@@ -1,0 +1,809 @@
+import React, { useState, Children } from 'react';
+import {
+  Search,
+  Filter,
+  Grid,
+  List,
+  Upload,
+  FileText,
+  Download,
+  Edit2,
+  Trash2,
+  Archive,
+  Eye,
+  MoreVertical,
+  ChevronRight,
+  ChevronDown,
+  FolderOpen,
+  RefreshCw,
+  Lock,
+  Plus,
+  X } from
+'lucide-react';
+import { useDocuments, Document } from '../context/DocumentContext';
+import { useAuth } from '../context/AuthContext';
+import { UploadModal } from '../components/UploadModal';
+import { DeleteFolderModal } from '../components/DeleteFolderModal';
+import FilePreview from '../components/FilePreview';
+import { useNavigation } from '../App';
+
+// Recursive folder tree item component
+interface FolderTreeItemProps {
+  folder: { id: string; name: string; parentId: string | null };
+  selectedFolder: string | null;
+  selectFolder: ((id: string | null) => void) | null;
+  getChildren: (parentId: string) => { id: string; name: string; parentId: string | null }[];
+  onCreateSubfolder: (parentId: string) => void;
+  level: number;
+}
+
+function FolderTreeItem({ folder, selectedFolder, selectFolder, getChildren, onCreateSubfolder, level }: FolderTreeItemProps) {
+  const [expanded, setExpanded] = React.useState(true);
+  const [deleteModal, setDeleteModal] = React.useState(false);
+  const { deleteFolder } = useDocuments();
+  const children = getChildren(folder.id);
+  const hasChildren = children.length > 0;
+  const paddingLeft = 8 + level * 16;
+
+  return (
+    <div>
+      <div
+        className={`flex items-center gap-1 rounded text-sm transition-colors group ${
+          selectedFolder === folder.id ? 'bg-[#427A43] text-white' : 'text-gray-600 hover:bg-gray-100'
+        }`}
+        style={{ paddingLeft: `${paddingLeft}px` }}
+      >
+        {hasChildren ? (
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="p-0.5 hover:bg-black/10 rounded"
+          >
+            {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+          </button>
+        ) : (
+          <span className="w-4" />
+        )}
+        <button
+          onClick={() => selectFolder && selectFolder(folder.id === selectedFolder ? null : folder.id)}
+          className="flex-1 text-left py-1.5 flex items-center gap-1.5 truncate"
+        >
+          <FolderOpen size={14} />
+          <span className="truncate">{folder.name}</span>
+        </button>
+        <button
+          onClick={(e) => { e.stopPropagation(); onCreateSubfolder(folder.id); }}
+          className={`p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity ${
+            selectedFolder === folder.id ? 'hover:bg-white/20 text-white' : 'hover:bg-gray-200 text-gray-500'
+          }`}
+          title="Create subfolder"
+        >
+          <Plus size={12} />
+        </button>
+        <button
+          onClick={(e) => { e.stopPropagation(); setDeleteModal(true); }}
+          className={`p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity ${
+            selectedFolder === folder.id ? 'hover:bg-white/20 text-white' : 'hover:bg-red-100 text-red-400'
+          }`}
+          title="Delete folder"
+        >
+          <Trash2 size={12} />
+        </button>
+      </div>
+      {deleteModal && (
+        <DeleteFolderModal
+          folderName={folder.name}
+          hasChildren={hasChildren}
+          childCount={children.length}
+          onConfirm={() => {
+            if (selectedFolder === folder.id) selectFolder && selectFolder(null);
+            deleteFolder(folder.id);
+            setDeleteModal(false);
+          }}
+          onCancel={() => setDeleteModal(false)}
+        />
+      )}
+      {expanded && hasChildren && (
+        <div>
+          {children.map((child) => (
+            <FolderTreeItem
+              key={child.id}
+              folder={child}
+              selectedFolder={selectedFolder}
+              selectFolder={selectFolder}
+              getChildren={getChildren}
+              onCreateSubfolder={onCreateSubfolder}
+              level={level + 1}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function DocumentsPage() {
+  const {
+    documents,
+    folders,
+    trashDocument,
+    archiveDocument,
+    addLog,
+    uploadNewVersion,
+    addFolder
+  } = useDocuments();
+  const { user } = useAuth();
+  const [search, setSearch] = useState('');
+  const [filterDept, setFilterDept] = useState('all');
+  const [filterStatus, setFilterStatus] = useState('all');
+  const [filterType, setFilterType] = useState('all');
+  const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
+  // selectedFolder is shared via NavigationContext so other pages can set it
+  const { selectedFolderId, selectFolder } = useNavigation();
+  const selectedFolder = selectedFolderId ?? null;
+  const visibleFolders = React.useMemo(() => {
+    if (!user) return [];
+    if (user.role === 'admin') return folders;
+    return folders.filter((folder) => {
+      const vis = (folder as any).visibility || 'private';
+      if (vis === 'admin-only') return false;
+      if (user.role === 'manager') return folder.department === user.department;
+      if (user.role === 'staff') return folder.createdById === user.id;
+      return false;
+    });
+  }, [folders, user]);
+  const [showUpload, setShowUpload] = useState(false);
+  const [actionDoc, setActionDoc] = useState<string | null>(null);
+  const [viewingDoc, setViewingDoc] = useState<Document | null>(null);
+  const [trashTarget, setTrashTarget] = useState<Document | null>(null);
+  const [showCreateFolder, setShowCreateFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [newFolderParentId, setNewFolderParentId] = useState<string | null>(null);
+  const departments = [
+  'Accounting',
+  'Marketing',
+  'Technical Support',
+  'HR',
+  'Administration'];
+
+  const activeDocuments = documents.filter((d) => d.status !== 'trashed' && d.status !== 'archived');
+  // Role-based document visibility:
+  // admin -> all documents
+  // manager -> documents in their department
+  // staff -> only documents uploaded by themselves
+  const hasDocumentAccess = (doc: Document) => {
+    if (!user) return false;
+    if (user.role === 'admin') return true;
+    if (user.role === 'manager') return doc.department === user.department;
+    // staff
+    return doc.uploadedById === user.id;
+  };
+
+  const filtered = activeDocuments.filter((doc) => {
+    const matchSearch =
+    !search ||
+    doc.title.toLowerCase().includes(search.toLowerCase()) ||
+    doc.reference.toLowerCase().includes(search.toLowerCase());
+    const matchDept = filterDept === 'all' || doc.department === filterDept;
+    const matchStatus = filterStatus === 'all' || doc.status === filterStatus;
+    const matchType = filterType === 'all' || doc.fileType === filterType;
+    const matchFolder = !selectedFolder || (doc.folderId && doc.folderId === selectedFolder);
+    return matchSearch && matchDept && matchStatus && matchType && matchFolder && hasDocumentAccess(doc);
+  });
+  const rootFolders = visibleFolders.filter((f) => f.parentId === null);
+  const getChildren = (parentId: string) => visibleFolders.filter((f) => f.parentId === parentId);
+  const statusBadge = (status: string) => {
+    const map: Record<string, string> = {
+      pending: 'bg-yellow-100 text-yellow-700',
+      approved: 'bg-green-100 text-green-700',
+      rejected: 'bg-red-100 text-red-700',
+      archived: 'bg-blue-100 text-blue-700'
+    };
+    return map[status] || 'bg-gray-100 text-gray-600';
+  };
+  const fileTypeColors: Record<string, string> = {
+    pdf: 'bg-red-100 text-red-700',
+    docx: 'bg-blue-100 text-blue-700',
+    xlsx: 'bg-green-100 text-green-700',
+    jpg: 'bg-purple-100 text-purple-700',
+    png: 'bg-pink-100 text-pink-700',
+    tiff: 'bg-cyan-100 text-cyan-700',
+    mp4: 'bg-indigo-100 text-indigo-700',
+    mov: 'bg-indigo-100 text-indigo-700',
+    avi: 'bg-indigo-100 text-indigo-700',
+    mkv: 'bg-indigo-100 text-indigo-700'
+  };
+  const handleTrash = (doc: Document) => {
+    setTrashTarget(doc);
+    setActionDoc(null);
+  };
+  const confirmTrash = (doc: Document) => {
+    trashDocument(doc.id);
+    addLog({
+      userId: user?.id || '',
+      userName: user?.name || '',
+      userRole: user?.role || '',
+      action: 'DOCUMENT_TRASHED',
+      target: doc.title,
+      targetType: 'document',
+      timestamp: new Date().toISOString(),
+      ipAddress: '192.168.1.100'
+    });
+    setTrashTarget(null);
+  };
+  const handleArchive = (doc: Document) => {
+    archiveDocument(doc.id);
+    addLog({
+      userId: user?.id || '',
+      userName: user?.name || '',
+      userRole: user?.role || '',
+      action: 'DOCUMENT_ARCHIVED',
+      target: doc.title,
+      targetType: 'document',
+      timestamp: new Date().toISOString(),
+      ipAddress: '192.168.1.100'
+    });
+    setActionDoc(null);
+  };
+  const handleView = (doc: Document) => {
+    setViewingDoc(doc);
+    addLog({
+      userId: user?.id || '',
+      userName: user?.name || '',
+      userRole: user?.role || '',
+      action: 'DOCUMENT_VIEW',
+      target: doc.title,
+      targetType: 'document',
+      timestamp: new Date().toISOString(),
+      ipAddress: '192.168.1.100'
+    });
+  };
+  return (
+    <div className="flex gap-6 h-full">
+      {/* Folder Tree Sidebar */}
+      <div className="w-56 flex-shrink-0 bg-white rounded-xl shadow-sm border border-gray-100 p-4 h-fit">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+            <FolderOpen size={16} className="text-[#427A43]" />
+            Folders
+          </h3>
+          <button
+            onClick={() => setShowCreateFolder(true)}
+            className="p-1 rounded-md bg-[#005F02] text-white hover:bg-[#427A43] transition-colors"
+            title="Create Folder">
+            <Plus size={14} />
+          </button>
+        </div>
+        <button
+          onClick={() => selectFolder && selectFolder(null)}
+          className={`w-full text-left px-2 py-1.5 rounded text-sm mb-1 transition-colors ${!selectedFolder ? 'bg-[#005F02] text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
+
+          All Documents
+        </button>
+        {rootFolders.map((folder) =>
+        <FolderTreeItem
+          key={folder.id}
+          folder={folder}
+          selectedFolder={selectedFolder}
+          selectFolder={selectFolder}
+          getChildren={getChildren}
+          onCreateSubfolder={(parentId) => {
+            setNewFolderParentId(parentId);
+            setShowCreateFolder(true);
+          }}
+          level={0}
+        />
+        )}
+      </div>
+
+      {/* Main Content */}
+      <div className="flex-1 min-w-0 space-y-4">
+        {/* Toolbar */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Search */}
+            <div className="flex items-center gap-2 bg-gray-100 rounded-lg px-3 py-2 flex-1 min-w-48">
+              <Search size={16} className="text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search by title or reference..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="bg-transparent text-sm outline-none flex-1 text-gray-700" />
+
+            </div>
+
+            {/* Filters */}
+            <select
+              value={filterDept}
+              onChange={(e) => setFilterDept(e.target.value)}
+              className="text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#427A43]">
+
+              <option value="all">All Departments</option>
+              {departments.map((d) =>
+              <option key={d} value={d}>
+                  {d}
+                </option>
+              )}
+            </select>
+
+            <select
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value)}
+              className="text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#427A43]">
+
+              <option value="all">All Status</option>
+              <option value="pending">Pending</option>
+              <option value="approved">Approved</option>
+              <option value="rejected">Rejected</option>
+            </select>
+
+            <select
+              value={filterType}
+              onChange={(e) => setFilterType(e.target.value)}
+              className="text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#427A43]">
+
+              <option value="all">All Types</option>
+              <option value="pdf">PDF</option>
+              <option value="docx">DOCX</option>
+              <option value="xlsx">XLSX</option>
+              <option value="jpg">JPG</option>
+              <option value="png">PNG</option>
+              <option value="mp4">MP4</option>
+              <option value="mov">MOV</option>
+              <option value="avi">AVI</option>
+              <option value="mkv">MKV</option>
+            </select>
+
+            <div className="flex items-center gap-1 ml-auto">
+              <button
+                onClick={() => setViewMode('list')}
+                className={`p-2 rounded-lg transition-colors ${viewMode === 'list' ? 'bg-[#005F02] text-white' : 'text-gray-500 hover:bg-gray-100'}`}>
+
+                <List size={16} />
+              </button>
+              <button
+                onClick={() => setViewMode('grid')}
+                className={`p-2 rounded-lg transition-colors ${viewMode === 'grid' ? 'bg-[#005F02] text-white' : 'text-gray-500 hover:bg-gray-100'}`}>
+
+                <Grid size={16} />
+              </button>
+            </div>
+
+            <button
+              onClick={() => setShowUpload(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-[#005F02] text-white text-sm font-medium rounded-lg hover:bg-[#427A43] transition-colors">
+
+              <Upload size={16} />
+              Upload
+            </button>
+          </div>
+        </div>
+
+        {/* Results Count */}
+        <p className="text-sm text-gray-500 px-1">
+          Showing{' '}
+          <span className="font-medium text-gray-700">{filtered.length}</span>{' '}
+          documents
+        </p>
+
+        {/* Document List */}
+        {viewMode === 'list' ?
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-100">
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                    Document
+                  </th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide hidden md:table-cell">
+                    Department
+                  </th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide hidden lg:table-cell">
+                    Date
+                  </th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                    Status
+                  </th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide hidden lg:table-cell">
+                    Version
+                  </th>
+                  <th className="px-4 py-3"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {filtered.length === 0 ?
+              <tr>
+                    <td colSpan={6} className="py-12 text-center text-gray-400">
+                      <FileText size={40} className="mx-auto mb-3 opacity-30" />
+                      <p>No documents found</p>
+                    </td>
+                  </tr> :
+
+              filtered.map((doc) =>
+              <tr
+                key={doc.id}
+                className="hover:bg-gray-50 transition-colors">
+
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <span
+                      className={`px-1.5 py-0.5 rounded text-xs font-bold uppercase ${fileTypeColors[doc.fileType] || 'bg-gray-100 text-gray-600'}`}>
+
+                            {doc.fileType}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="font-medium text-gray-800 truncate max-w-48">
+                              {doc.title}
+                            </p>
+                            <p className="text-xs text-gray-400">
+                              {doc.reference}
+                            </p>
+                          </div>
+                          {doc.isEncrypted &&
+                    <Lock
+                      size={12}
+                      className="text-yellow-500 flex-shrink-0" />
+
+                    }
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-gray-600 hidden md:table-cell">
+                        {doc.department}
+                      </td>
+                      <td className="px-4 py-3 text-gray-500 hidden lg:table-cell">
+                        {doc.date}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span
+                    className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusBadge(doc.status)}`}>
+
+                          {doc.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-gray-500 hidden lg:table-cell">
+                        v{doc.version}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1 justify-end">
+                          <button
+                      onClick={() => handleView(doc)}
+                      className="p-1.5 text-gray-400 hover:text-[#005F02] hover:bg-green-50 rounded transition-colors"
+                      title="View">
+
+                            <Eye size={15} />
+                          </button>
+                          <button
+                      onClick={() =>
+                      addLog({
+                        userId: user?.id || '',
+                        userName: user?.name || '',
+                        userRole: user?.role || '',
+                        action: 'DOCUMENT_DOWNLOAD',
+                        target: doc.title,
+                        targetType: 'document',
+                        timestamp: new Date().toISOString(),
+                        ipAddress: '192.168.1.100'
+                      })
+                      }
+                      className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                      title="Download">
+
+                            <Download size={15} />
+                          </button>
+                          {(user?.role === 'admin' ||
+                    doc.uploadedById === user?.id) &&
+                    <>
+                              <button
+                        onClick={() => handleArchive(doc)}
+                        className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors"
+                        title="Archive">
+
+                                <Archive size={15} />
+                              </button>
+                              <button
+                        onClick={() => handleTrash(doc)}
+                        className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                        title="Move to Trash">
+
+                                <Trash2 size={15} />
+                              </button>
+                            </>
+                    }
+                        </div>
+                      </td>
+                    </tr>
+              )
+              }
+              </tbody>
+            </table>
+          </div> :
+
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            {filtered.map((doc) =>
+          <div
+            key={doc.id}
+            className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 hover:shadow-md transition-shadow">
+
+                <div className="flex items-center justify-between mb-3">
+                  <span
+                className={`px-2 py-0.5 rounded text-xs font-bold uppercase ${fileTypeColors[doc.fileType] || 'bg-gray-100 text-gray-600'}`}>
+
+                    {doc.fileType}
+                  </span>
+                  <span
+                className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusBadge(doc.status)}`}>
+
+                    {doc.status}
+                  </span>
+                </div>
+                <h4 className="font-medium text-gray-800 text-sm mb-1 line-clamp-2">
+                  {doc.title}
+                </h4>
+                <p className="text-xs text-gray-500 mb-1">{doc.department}</p>
+                <p className="text-xs text-gray-400">
+                  {doc.date} · v{doc.version}
+                </p>
+                <div className="flex items-center gap-1 mt-3 pt-3 border-t border-gray-100">
+                  <button
+                onClick={() => handleView(doc)}
+                className="flex-1 py-1.5 text-xs text-[#005F02] hover:bg-green-50 rounded transition-colors">
+
+                    View
+                  </button>
+                  <button
+                onClick={() =>
+                addLog({
+                  userId: user?.id || '',
+                  userName: user?.name || '',
+                  userRole: user?.role || '',
+                  action: 'DOCUMENT_DOWNLOAD',
+                  target: doc.title,
+                  targetType: 'document',
+                  timestamp: new Date().toISOString(),
+                  ipAddress: '192.168.1.100'
+                })
+                }
+                className="flex-1 py-1.5 text-xs text-blue-600 hover:bg-blue-50 rounded transition-colors">
+
+                    Download
+                  </button>
+                  {(user?.role === 'admin' ||
+              doc.uploadedById === user?.id) &&
+              <button
+                onClick={() => handleTrash(doc)}
+                className="flex-1 py-1.5 text-xs text-red-500 hover:bg-red-50 rounded transition-colors">
+
+                      Delete
+                    </button>
+              }
+                </div>
+              </div>
+          )}
+          </div>
+        }
+      </div>
+
+      {showUpload && <UploadModal onClose={() => setShowUpload(false)} defaultFolderId={selectedFolder || undefined} />}
+
+      {/* Create Folder Modal */}
+      {showCreateFolder && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="p-6 border-b border-gray-100 flex items-center justify-between">
+              <h3 className="font-semibold text-gray-800 text-lg">Create New Folder</h3>
+              <button
+                onClick={() => { setShowCreateFolder(false); setNewFolderName(''); }}
+                className="p-1 text-gray-400 hover:text-gray-600 transition-colors">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Folder Name</label>
+                <input
+                  type="text"
+                  value={newFolderName}
+                  onChange={(e) => setNewFolderName(e.target.value)}
+                  placeholder="Enter folder name..."
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#427A43] text-gray-800"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Parent Folder (optional)</label>
+                <select
+                  value={newFolderParentId || ''}
+                  onChange={(e) => setNewFolderParentId(e.target.value || null)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#427A43] text-gray-800"
+                >
+                  <option value="">None (Root folder)</option>
+                  {visibleFolders.map((f) => (
+                    <option key={f.id} value={f.id}>{f.parentId ? `  └ ${f.name}` : f.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="p-6 pt-0 flex gap-3">
+              <button
+                onClick={() => {
+                  if (!newFolderName.trim() || !user) return;
+                  addFolder({
+                    name: newFolderName.trim(),
+                    parentId: newFolderParentId,
+                    department: user.department,
+                    createdBy: user.name,
+                    createdById: user.id,
+                    createdByRole: user.role,
+                    visibility: 'private',
+                    permissions: ['admin', 'manager']
+                  });
+                  setNewFolderName('');
+                  setNewFolderParentId(null);
+                  setShowCreateFolder(false);
+                }}
+                disabled={!newFolderName.trim()}
+                className="flex-1 py-2.5 bg-[#005F02] text-white text-sm font-medium rounded-lg hover:bg-[#427A43] transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                Create Folder
+              </button>
+              <button
+                onClick={() => { setShowCreateFolder(false); setNewFolderName(''); setNewFolderParentId(null); }}
+                className="flex-1 py-2.5 border border-gray-300 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Document View Modal */}
+      {viewingDoc &&
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b border-gray-100 sticky top-0 bg-white">
+              <div className="flex items-start justify-between">
+                <div>
+                  <h3 className="font-semibold text-gray-800 text-lg">
+                    {viewingDoc.title}
+                  </h3>
+                  <p className="text-sm text-gray-500 mt-0.5">
+                    {viewingDoc.reference}
+                  </p>
+                </div>
+                <button
+                onClick={() => setViewingDoc(null)}
+                className="p-1 text-gray-400 hover:text-gray-600">
+
+                  ✕
+                </button>
+              </div>
+            </div>
+            <div className="p-6 space-y-3">
+              {viewingDoc && (
+                <div className="mb-3">
+                  <FilePreview doc={viewingDoc} />
+                </div>
+              )}
+              {[
+            ['Department', viewingDoc.department],
+            ['Uploaded By', viewingDoc.uploadedBy],
+            ['Date', viewingDoc.date],
+            ['File Type', viewingDoc.fileType.toUpperCase()],
+            ['File Size', viewingDoc.size],
+            ['Version', `v${viewingDoc.version}`],
+            ['Status', viewingDoc.status],
+            ['Needs Approval', viewingDoc.needsApproval ? 'Yes' : 'No'],
+            ['Approved By', viewingDoc.approvedBy || 'N/A'],
+            ['Encrypted', viewingDoc.isEncrypted ? 'Yes' : 'No'],
+            ['Description', viewingDoc.description || 'N/A']].
+            map(([label, value]) =>
+            <div
+              key={label}
+              className="flex justify-between text-sm border-b border-gray-50 pb-2">
+
+                  <span className="text-gray-500">{label}</span>
+                  <span className="text-gray-800 font-medium text-right max-w-48">
+                    {value}
+                  </span>
+                </div>
+            )}
+              {viewingDoc.tags && viewingDoc.tags.length > 0 &&
+            <div>
+                  <p className="text-sm text-gray-500 mb-2">Tags</p>
+                  <div className="flex flex-wrap gap-1">
+                    {viewingDoc.tags.map((tag) =>
+                <span
+                  key={tag}
+                  className="px-2 py-0.5 bg-[#F2E3BB] text-[#005F02] text-xs rounded-full">
+
+                        {tag}
+                      </span>
+                )}
+                  </div>
+                </div>
+            }
+              {viewingDoc.rejectionReason &&
+            <div className="p-3 bg-red-50 rounded-lg">
+                  <p className="text-xs font-medium text-red-700">
+                    Rejection Reason:
+                  </p>
+                  <p className="text-xs text-red-600 mt-1">
+                    {viewingDoc.rejectionReason}
+                  </p>
+                </div>
+            }
+            </div>
+            <div className="p-6 pt-0 flex gap-3">
+              <button
+              onClick={() => {
+                addLog({
+                  userId: user?.id || '',
+                  userName: user?.name || '',
+                  userRole: user?.role || '',
+                  action: 'DOCUMENT_DOWNLOAD',
+                  target: viewingDoc.title,
+                  targetType: 'document',
+                  timestamp: new Date().toISOString(),
+                  ipAddress: '192.168.1.100'
+                });
+                setViewingDoc(null);
+              }}
+              className="flex-1 py-2.5 bg-[#005F02] text-white text-sm font-medium rounded-lg hover:bg-[#427A43] transition-colors">
+
+                Download
+              </button>
+              <button
+              onClick={() => setViewingDoc(null)}
+              className="flex-1 py-2.5 border border-gray-300 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">
+
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      }
+
+      {/* Move to Trash Confirmation */}
+      {trashTarget && (
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          onClick={() => setTrashTarget(null)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-sm"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-6">
+              <div className="flex items-start gap-4">
+                <div className="p-2 bg-red-50 rounded-xl flex-shrink-0">
+                  <Trash2 size={22} className="text-red-500" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-gray-800 text-base">Move to Trash</h3>
+                  <p className="text-sm text-gray-500 mt-1">
+                    Move <span className="font-medium text-gray-700">"{trashTarget.title}"</span> to trash?<br />
+                    You can restore it from the Trash page.
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="px-6 pb-6 flex gap-3">
+              <button
+                onClick={() => setTrashTarget(null)}
+                className="flex-1 py-2.5 border border-gray-300 text-gray-600 text-sm font-medium rounded-xl hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => confirmTrash(trashTarget)}
+                className="flex-1 py-2.5 bg-red-600 text-white text-sm font-semibold rounded-xl hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
+              >
+                <Trash2 size={14} />
+                Move to Trash
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>);
+
+}

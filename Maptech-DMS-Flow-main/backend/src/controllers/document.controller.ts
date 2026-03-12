@@ -1,0 +1,297 @@
+import type { Response } from 'express';
+import type { AuthRequest } from '../middleware/auth.middleware';
+import pool from '../db';
+import fs from 'fs';
+import { v4 as uuidv4 } from 'uuid';
+
+// Create document with backend-generated reference
+export const createDocument = async (req: AuthRequest, res: Response) => {
+  try {
+    const {
+      title,
+      department_id,
+      department,
+      description,
+      folder_id,
+      needs_approval,
+      file_type,
+      size,
+      date
+    } = req.body;
+
+    if (!title) return res.status(400).json({ error: 'title is required' });
+
+    const needsApproval = needs_approval === undefined ? true
+      : needs_approval === 'false' || needs_approval === false ? false : true;
+
+    // Validate uploaded file
+    const uploadedFile = (req as any).file;
+    if (!uploadedFile) return res.status(400).json({ error: 'File is required' });
+
+    // Read file content into buffer for DB storage
+    let fileDataBuffer: Buffer | null = null;
+    try {
+      fileDataBuffer = fs.readFileSync(uploadedFile.path);
+    } catch (e) {
+      console.error('Could not read uploaded file:', e);
+    }
+
+    // Validate folder_id
+    if (!folder_id || folder_id.trim() === '') {
+      return res.status(400).json({ error: 'Folder is required to upload a document' });
+    }
+    const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+    if (!isUuid(folder_id)) {
+      return res.status(400).json({ error: 'Invalid folder_id format' });
+    }
+    const folderRes = await pool.query('SELECT id, department FROM folders WHERE id = $1', [folder_id]);
+    if (folderRes.rows.length === 0) {
+      return res.status(400).json({ error: 'Folder not found' });
+    }
+    const folderDeptName: string = folderRes.rows[0].department || '';
+
+    // Validate authenticated user
+    const uploadedById = req.userId || null;
+    if (!uploadedById) return res.status(401).json({ error: 'Authentication required' });
+    const userRes = await pool.query('SELECT name FROM users WHERE id = $1', [uploadedById]);
+    const uploadedByName: string = userRes.rows[0]?.name || 'Unknown';
+
+    // Resolve department
+    let deptId: string | null = null;
+    let deptName: string = 'General';
+    let deptCode: string = 'GEN';
+
+    // Try by explicit department_id
+    if (department_id && isUuid(department_id)) {
+      const dr = await pool.query('SELECT id, name FROM departments WHERE id = $1', [department_id]);
+      if (dr.rows[0]) { deptId = dr.rows[0].id; deptName = dr.rows[0].name; }
+    }
+    // Try by explicit department name
+    if (!deptId && department) {
+      const dr = await pool.query('SELECT id, name FROM departments WHERE LOWER(name) = LOWER($1) LIMIT 1', [department]);
+      if (dr.rows[0]) { deptId = dr.rows[0].id; deptName = dr.rows[0].name; }
+    }
+    // Try by folder department name
+    if (!deptId && folderDeptName) {
+      const dr = await pool.query('SELECT id, name FROM departments WHERE LOWER(name) = LOWER($1) LIMIT 1', [folderDeptName]);
+      if (dr.rows[0]) { deptId = dr.rows[0].id; deptName = dr.rows[0].name; }
+      else { deptName = folderDeptName; }
+    }
+    deptCode = (deptName || 'GEN').slice(0, 3).toUpperCase();
+
+    const year = new Date().getFullYear();
+    const docDate = date || new Date().toISOString().split('T')[0];
+    const filePath = uploadedFile.path;
+    const fileType = file_type || uploadedFile.originalname?.split('.').pop()?.toLowerCase()?.slice(0, 10) || 'pdf';
+    const fileSize = size || `${Math.round((uploadedFile.size || 0) / 1024 / 1024 * 10) / 10} MB`;
+
+    // Generate reference number (outside transaction to avoid lock issues)
+    let lastNumber = 1;
+    if (deptId) {
+      try {
+        // Upsert counter
+        const upsertRes = await pool.query(`
+          INSERT INTO document_counters (department_id, year, last_number) VALUES ($1, $2, 1)
+          ON CONFLICT (department_id, year) DO UPDATE SET last_number = document_counters.last_number + 1
+          RETURNING last_number
+        `, [deptId, year]);
+        lastNumber = upsertRes.rows[0].last_number;
+      } catch (counterErr: any) {
+        console.warn('Counter upsert failed, falling back to count:', counterErr?.message);
+        try {
+          const cntRes = await pool.query(
+            `SELECT COUNT(*) AS cnt FROM documents WHERE department = $1 AND EXTRACT(YEAR FROM "date"::date) = $2`,
+            [deptName, year]
+          );
+          lastNumber = Number(cntRes.rows[0]?.cnt || 0) + 1;
+        } catch { lastNumber = Math.floor(Math.random() * 900) + 100; }
+      }
+    } else {
+      try {
+        const cntRes = await pool.query(
+          `SELECT COUNT(*) AS cnt FROM documents WHERE department = $1 AND EXTRACT(YEAR FROM "date"::date) = $2`,
+          [deptName, year]
+        );
+        lastNumber = Number(cntRes.rows[0]?.cnt || 0) + 1;
+      } catch { lastNumber = 1; }
+    }
+
+    const reference = `${deptCode}_${year}_${String(lastNumber).padStart(3, '0')}`;
+
+    // Insert document (simple INSERT, no wrapping transaction needed)
+    const cols: string[] = [
+      'id', 'title', 'reference', '"date"', 'uploaded_by',
+      'uploaded_by_id', 'status', 'version', 'file_type',
+      'needs_approval', 'description', 'folder_id', 'size', 'created_at'
+    ];
+    const vals: any[] = [
+      uuidv4(),
+      title,
+      reference,
+      docDate,
+      uploadedByName,
+      uploadedById,
+      needsApproval ? 'pending' : 'approved',
+      1,
+      fileType,
+      needsApproval,
+      description || null,
+      folder_id,
+      fileSize,
+      new Date(),
+    ];
+
+    // Add optional columns if available in DB
+    // Always push department text (defaults to 'General' so never null)
+    cols.push('department'); vals.push(deptName);
+    if (deptId) { cols.push('department_id'); vals.push(deptId); }
+    if (filePath) { cols.push('file_path'); vals.push(filePath); }
+    if (fileDataBuffer) { cols.push('file_data'); vals.push(fileDataBuffer); }
+
+    const colsStr = cols.join(', ');
+    const placeholders = vals.map((_, i) => `$${i + 1}`).join(', ');
+
+    const insertRes = await pool.query(
+      `INSERT INTO documents (${colsStr}) VALUES (${placeholders}) RETURNING *`,
+      vals
+    );
+
+    const created = insertRes.rows[0];
+    return res.status(201).json({ message: 'Document uploaded successfully', reference: created.reference, document: created });
+
+  } catch (err: any) {
+    console.error('createDocument error:', err?.message || err);
+    return res.status(500).json({ error: err?.message || 'Server error' });
+  }
+};
+
+// List documents (returns all, frontend filters by role/department)
+export const listDocuments = async (req: AuthRequest, res: Response) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, title, department, reference, date, uploaded_by, uploaded_by_id,
+              status, version, file_type, size, folder_id, needs_approval,
+              approved_by, rejection_reason, metadata, is_encrypted, retention_days,
+              trashed_at, archived_at, tags, description, scanned_from, file_path, created_at
+       FROM documents
+       ORDER BY created_at DESC`
+    );
+    return res.json({ documents: result.rows });
+  } catch (err: any) {
+    console.error('listDocuments error:', err?.message || err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+};
+
+// Approve a document
+export const approveDocument = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const userId = req.userId;
+    const userRes = await pool.query('SELECT name FROM users WHERE id = $1', [userId]);
+    const approvedBy = userRes.rows[0]?.name || 'Unknown';
+
+    const result = await pool.query(
+      `UPDATE documents SET status = 'approved', approved_by = $1 WHERE id = $2 RETURNING *`,
+      [approvedBy, id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Document not found' });
+    return res.json({ message: 'Document approved', document: result.rows[0] });
+  } catch (err: any) {
+    console.error('approveDocument error:', err?.message || err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+};
+
+// Reject a document
+export const rejectDocument = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+    const userId = req.userId;
+    const userRes = await pool.query('SELECT name FROM users WHERE id = $1', [userId]);
+    const rejectedBy = userRes.rows[0]?.name || 'Unknown';
+
+    const result = await pool.query(
+      `UPDATE documents SET status = 'rejected', rejection_reason = $1, approved_by = $2 WHERE id = $3 RETURNING *`,
+      [reason || '', rejectedBy, id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Document not found' });
+    return res.json({ message: 'Document rejected', document: result.rows[0] });
+  } catch (err: any) {
+    console.error('rejectDocument error:', err?.message || err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+};
+
+// Trash a document
+export const trashDocument = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      `UPDATE documents SET status = 'trashed', trashed_at = NOW() WHERE id = $1 RETURNING *`,
+      [id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Document not found' });
+    return res.json({ message: 'Document trashed', document: result.rows[0] });
+  } catch (err: any) {
+    console.error('trashDocument error:', err?.message || err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+};
+
+// Restore a document from trash
+export const restoreDocument = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      `UPDATE documents SET status = 'approved', trashed_at = NULL, archived_at = NULL WHERE id = $1 RETURNING *`,
+      [id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Document not found' });
+    return res.json({ message: 'Document restored', document: result.rows[0] });
+  } catch (err: any) {
+    console.error('restoreDocument error:', err?.message || err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+};
+
+// Permanently delete a document
+export const permanentlyDeleteDocument = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query('DELETE FROM documents WHERE id = $1 RETURNING id', [id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Document not found' });
+    return res.json({ message: 'Document permanently deleted' });
+  } catch (err: any) {
+    console.error('permanentlyDeleteDocument error:', err?.message || err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+};
+
+// Archive a document
+export const archiveDocument = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      `UPDATE documents SET status = 'archived', archived_at = NOW() WHERE id = $1 RETURNING *`,
+      [id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Document not found' });
+    return res.json({ message: 'Document archived', document: result.rows[0] });
+  } catch (err: any) {
+    console.error('archiveDocument error:', err?.message || err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+};
+
+export default {
+  createDocument,
+  listDocuments,
+  approveDocument,
+  rejectDocument,
+  trashDocument,
+  restoreDocument,
+  permanentlyDeleteDocument,
+  archiveDocument
+};
