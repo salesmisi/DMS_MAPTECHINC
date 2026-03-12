@@ -2,6 +2,7 @@ import type { Response } from 'express';
 import type { AuthRequest } from '../middleware/auth.middleware';
 import pool from '../db';
 import fs from 'fs';
+import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 
 // Create document with backend-generated reference
@@ -171,8 +172,9 @@ export const listDocuments = async (req: AuthRequest, res: Response) => {
     const result = await pool.query(
       `SELECT id, title, department, reference, date, uploaded_by, uploaded_by_id,
               status, version, file_type, size, folder_id, needs_approval,
-              approved_by, rejection_reason, metadata, is_encrypted, retention_days,
-              trashed_at, archived_at, tags, description, scanned_from, file_path, created_at
+              approved_by, rejection_reason,
+              is_encrypted, trashed_at, archived_at, tags, description,
+              scanned_from, file_path, created_at
        FROM documents
        ORDER BY created_at DESC`
     );
@@ -285,6 +287,71 @@ export const archiveDocument = async (req: AuthRequest, res: Response) => {
   }
 };
 
+// Download a document file
+export const downloadDocument = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const docId = Array.isArray(id) ? id[0] : id;
+    const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+    if (!isUuid(docId)) return res.status(400).json({ error: 'Invalid document id' });
+
+    const result = await pool.query(
+      'SELECT title, file_type, file_path, file_data FROM documents WHERE id = $1',
+      [docId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Document not found' });
+
+    const doc = result.rows[0];
+    const ext = doc.file_type || 'bin';
+    const safeTitle = (doc.title || 'document').replace(/[^a-zA-Z0-9._-]/g, '_');
+    const filename = `${safeTitle}.${ext}`;
+
+    const mimeTypes: Record<string, string> = {
+      pdf: 'application/pdf',
+      doc: 'application/msword',
+      docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      xls: 'application/vnd.ms-excel',
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      png: 'image/png',
+      tiff: 'image/tiff',
+      tif: 'image/tiff',
+      mp4: 'video/mp4',
+      mov: 'video/quicktime',
+      avi: 'video/x-msvideo',
+      mkv: 'video/x-matroska',
+    };
+    const contentType = mimeTypes[ext.toLowerCase()] || 'application/octet-stream';
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+    // Try serving from disk first, then fall back to file_data in DB
+    if (doc.file_path) {
+      const filePath = path.isAbsolute(doc.file_path)
+        ? doc.file_path
+        : path.join(process.cwd(), doc.file_path);
+
+      if (fs.existsSync(filePath)) {
+        const stream = fs.createReadStream(filePath);
+        stream.pipe(res);
+        return;
+      }
+    }
+
+    // Fall back to binary data stored in DB
+    if (doc.file_data) {
+      return res.send(doc.file_data);
+    }
+
+    return res.status(404).json({ error: 'File content not found' });
+  } catch (err: any) {
+    console.error('downloadDocument error:', err?.message || err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+};
+
 export default {
   createDocument,
   listDocuments,
@@ -293,5 +360,6 @@ export default {
   trashDocument,
   restoreDocument,
   permanentlyDeleteDocument,
-  archiveDocument
+  archiveDocument,
+  downloadDocument
 };

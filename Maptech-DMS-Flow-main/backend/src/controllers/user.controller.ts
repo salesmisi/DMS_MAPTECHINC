@@ -143,6 +143,10 @@ export const updateUser = async (req: Request, res: Response) => {
     const { id } = req.params;
     const { name, email, role, department, status, avatar } = req.body;
 
+    // fetch previous department to detect changes
+    const prevRes = await pool.query('SELECT department FROM users WHERE id = $1', [id]);
+    const prevDept = prevRes.rows[0]?.department || null;
+
     const result = await pool.query(
       `UPDATE users
        SET name       = COALESCE($1, name),
@@ -160,6 +164,22 @@ export const updateUser = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'User not found' });
 
     const r = result.rows[0];
+
+    // If department changed, create a notification for the affected user
+    try {
+      const newDept = r.department || null;
+      if (prevDept !== newDept && newDept) {
+        const title = `Assigned to department ${newDept}`;
+        const message = `You have been assigned to the ${newDept} department.`;
+        await pool.query(
+          `INSERT INTO notifications (user_id, type, title, message, is_read, created_at)
+           VALUES ($1, $2, $3, $4, FALSE, NOW())`,
+          [id, 'assignment', title, message]
+        );
+      }
+    } catch (e) {
+      console.error('Failed to create department assignment notification:', e);
+    }
     return res.json({
       id: r.id,
       name: r.name,

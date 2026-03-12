@@ -28,6 +28,8 @@ export function DepartmentManagement() {
     createDepartment({
       name: newDeptName.trim()
     });
+    // Refresh folders so the newly-created department root folder appears
+    window.dispatchEvent(new Event('dms-folders-refresh'));
     if (currentUser) {
       addActivityLog({
         action: 'CREATE_DEPARTMENT',

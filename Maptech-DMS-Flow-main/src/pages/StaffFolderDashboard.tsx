@@ -19,7 +19,13 @@ export function StaffFolderDashboard() {
       const vis = (folder as any).visibility || 'private';
       if (vis === 'admin-only') return false;
       if (user.role === 'manager') return folder.department === user.department;
-      if (user.role === 'staff') return folder.createdById === user.id;
+      if (user.role === 'staff') {
+        // Staff see department-visible folders for their department
+        // or private folders they themselves created.
+        if (vis === 'department' && String(folder.department || '').trim().toLowerCase() === String(user.department || '').trim().toLowerCase()) return true;
+        if (vis === 'private' && String(folder.createdById || '') === String(user.id || '')) return true;
+        return false;
+      }
       return false;
     });
   }, [folders, user]);
@@ -46,10 +52,19 @@ export function StaffFolderDashboard() {
     setDeleteTarget({ id, name, childCount: children.length });
   };
   const confirmDelete = () => {
-    if (!deleteTarget) return;
-    deleteFolder(deleteTarget.id);
-    addLog({ userId: user?.id || '', userName: user?.name || '', userRole: user?.role || '', action: 'FOLDER_DELETED', target: deleteTarget.name, targetType: 'folder', timestamp: new Date().toISOString(), ipAddress: '127.0.0.1' });
-    setDeleteTarget(null);
+    (async () => {
+      if (!deleteTarget) return;
+      const res = await deleteFolder(deleteTarget.id);
+      if (res && res.ok) {
+        addLog({ userId: user?.id || '', userName: user?.name || '', userRole: user?.role || '', action: 'FOLDER_DELETED', target: deleteTarget.name, targetType: 'folder', timestamp: new Date().toISOString(), ipAddress: '127.0.0.1' });
+      } else if (res && res.status === 202) {
+        addLog({ userId: user?.id || '', userName: user?.name || '', userRole: user?.role || '', action: 'DELETE_REQUESTED', target: deleteTarget.name, targetType: 'folder', timestamp: new Date().toISOString(), ipAddress: '127.0.0.1' });
+        alert(res.message || 'Delete approval requested');
+      } else {
+        alert(res?.error || 'Failed to delete folder');
+      }
+      setDeleteTarget(null);
+    })();
   };
 
   const FolderRow = ({ folder, depth = 0 }: { folder: (typeof folders)[0]; depth?: number }) => {
@@ -84,7 +99,10 @@ export function StaffFolderDashboard() {
           <h2 className="text-2xl font-bold mb-1 flex items-center gap-3"><FolderOpen size={28} />My Folders</h2>
           <p className="text-[#C0B87A] text-sm">Create and manage your private folders</p>
         </div>
-        <button onClick={() => { setNewFolder({ name: '', parentId: null, department: user?.department || '' }); setShowCreate(true); }} className="flex items-center gap-2 px-4 py-2.5 bg-[#C0B87A] text-[#005F02] font-semibold text-sm rounded-xl"> <FolderPlus size={18} /> New Folder</button>
+        {/* Staff should not create root folders */}
+        {user?.role !== 'staff' && (
+          <button onClick={() => { setNewFolder({ name: '', parentId: null, department: user?.department || '' }); setShowCreate(true); }} className="flex items-center gap-2 px-4 py-2.5 bg-[#C0B87A] text-[#005F02] font-semibold text-sm rounded-xl"> <FolderPlus size={18} /> New Folder</button>
+        )}
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">

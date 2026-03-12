@@ -62,6 +62,12 @@ async function runMigrations() {
         UNIQUE(department_id, year)
       )
     `);
+    // Ensure folders table has is_department column
+    try {
+      await client.query(`ALTER TABLE folders ADD COLUMN IF NOT EXISTS is_department BOOLEAN NOT NULL DEFAULT FALSE`);
+    } catch (e) {
+      // ignore
+    }
     console.log('Migrations applied successfully');
   } catch (e: any) {
     console.warn('Migration warning:', e?.message || e);

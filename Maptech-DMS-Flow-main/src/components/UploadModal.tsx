@@ -116,6 +116,7 @@ export function UploadModal({ onClose, defaultFolderId }: UploadModalProps) {
       // Add document locally (omit id so context generates local id)
       const serverDoc = data.document || {};
       const localDoc = {
+        id: serverDoc.id,
         title: serverDoc.title || form.title,
         department: serverDoc.department || (departments.find(d => d.id === form.departmentId)?.name) || '',
         reference: reference || '',

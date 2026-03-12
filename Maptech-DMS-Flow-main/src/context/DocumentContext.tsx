@@ -43,6 +43,7 @@ export interface Folder {
   visibility: 'private' | 'department' | 'admin-only';
   permissions: string[];
   createdAt: string;
+  isDepartment?: boolean;
 }
 
 export interface ActivityLog {
@@ -62,7 +63,7 @@ interface DocumentContextType {
   documents: Document[];
   folders: Folder[];
   activityLogs: ActivityLog[];
-  addDocument: (doc: Omit<Document, 'id'>) => Document;
+  addDocument: (doc: Omit<Document, 'id'> & { id?: string }) => Document;
   updateDocument: (id: string, updates: Partial<Document>) => void;
   deleteDocument: (id: string) => void;
   approveDocument: (id: string, approvedBy: string) => void;
@@ -73,7 +74,7 @@ interface DocumentContextType {
   permanentlyDelete: (id: string) => void;
   addFolder: (folder: Omit<Folder, 'id' | 'createdAt'>) => void;
   updateFolder: (id: string, updates: Partial<Folder>) => void;
-  deleteFolder: (id: string) => void;
+  deleteFolder: (id: string) => Promise<any>;
   addLog: (log: Omit<ActivityLog, 'id'>) => void;
   uploadNewVersion: (id: string, uploadedBy: string) => void;
   refreshDocuments: () => Promise<void>;
@@ -89,10 +90,13 @@ export function useDocuments() {
 
 const DOCS_KEY = 'dms_documents';
 
+import { useAuth } from './AuthContext';
+
 export function DocumentProvider({ children }: { children: ReactNode }) {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
+  const { token, user, refreshCurrentUser } = useAuth();
 
   // 🔹 NORMALIZE folder row from DB (snake_case -> camelCase)
   const normalizeFolder = (f: any): Folder => ({
@@ -106,23 +110,50 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
     visibility: f.visibility ?? 'private',
     permissions: f.permissions ?? [],
     createdAt: f.created_at ?? f.createdAt ?? '',
+    isDepartment: f.is_department ?? f.isDepartment ?? false,
   });
 
   // 🔹 LOAD FOLDERS FROM BACKEND
   const fetchFolders = async () => {
     try {
-      const token = localStorage.getItem("dms_token");
+      const authToken = token || localStorage.getItem("dms_token");
 
       const res = await fetch("http://localhost:5000/api/folders", {
         headers: {
-          Authorization: `Bearer ${token}`
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {})
         }
       });
 
       const data = await res.json();
 
-      if (data.folders) {
-        setFolders(data.folders.map(normalizeFolder));
+      if (data.visibleFolders) {
+        setFolders(data.visibleFolders.map(normalizeFolder));
+      } else if (data.folders) {
+        // If server didn't provide pre-filtered visibleFolders, filter client-side
+        // using the current user (from context) or fallback to stored current user.
+        const stored = localStorage.getItem('dms_current_user');
+        const storedUser = stored ? (() => { try { return JSON.parse(stored); } catch { return null; } })() : null;
+        const localUser: any = (typeof (window as any).__auth_user__ !== 'undefined') ? (window as any).__auth_user__ : null;
+        const effectiveUser = localUser || (typeof user !== 'undefined' ? user : null) || storedUser;
+
+        if (effectiveUser && effectiveUser.role !== 'admin') {
+          const visible = data.folders.filter((folder: any) => {
+            const vis = folder.visibility || 'private';
+            if (vis === 'admin-only') return false;
+            if (vis === 'department') return String(folder.department || '').trim().toLowerCase() === String(effectiveUser.department || '').trim().toLowerCase();
+            if (vis === 'private') return String(folder.created_by_id || folder.createdById || '') === String(effectiveUser.id || '');
+            return false;
+          });
+          // If nothing matched (possible stale/missing user), fall back to showing department folders
+          if (visible.length === 0) {
+            const deptFolders = data.folders.filter((f: any) => (f.visibility || 'private') === 'department');
+            setFolders(deptFolders.map(normalizeFolder));
+          } else {
+            setFolders(visible.map(normalizeFolder));
+          }
+        } else {
+          setFolders(data.folders.map(normalizeFolder));
+        }
       }
 
     } catch (err) {
@@ -160,15 +191,15 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
   // 🔹 LOAD DOCUMENTS FROM BACKEND
   const fetchDocuments = async () => {
     try {
-      const token = localStorage.getItem("dms_token");
-      if (!token) {
+      const authToken = token || localStorage.getItem("dms_token");
+      if (!authToken) {
         // Fallback to localStorage if not authenticated yet
         const storedDocs = localStorage.getItem(DOCS_KEY);
         if (storedDocs) setDocuments(JSON.parse(storedDocs));
         return;
       }
       const res = await fetch("http://localhost:5000/api/documents", {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) }
       });
       if (!res.ok) {
         // Fallback to localStorage
@@ -192,9 +223,28 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    fetchDocuments();
-    fetchFolders();
-    fetchActivityLogs();
+    (async () => {
+      // If we have a token and the user's department is missing, refresh the user
+      try {
+        if (token && user && user.role === 'staff' && (!user.department || !String(user.department).trim())) {
+          await refreshCurrentUser?.();
+        }
+      } catch (e) {
+        // ignore
+      }
+      await fetchDocuments();
+      await fetchFolders();
+      await fetchActivityLogs();
+    })();
+  }, [token, user, refreshCurrentUser]);
+
+  // Listen for external refresh events (e.g., after creating departments)
+  useEffect(() => {
+    const onRefresh = () => {
+      fetchFolders();
+    };
+    window.addEventListener('dms-folders-refresh', onRefresh);
+    return () => window.removeEventListener('dms-folders-refresh', onRefresh);
   }, []);
 
   // 🔹 Re-fetch documents when token changes (e.g. after login)
@@ -226,10 +276,10 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
   // Fetch activity logs from backend
   const fetchActivityLogs = async () => {
     try {
-      const token = localStorage.getItem('dms_token');
-      if (!token) return;
+      const authToken = token || localStorage.getItem('dms_token');
+      if (!authToken) return;
       const res = await fetch('http://localhost:5000/api/activity-logs', {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) }
       });
       if (!res.ok) return;
       const data = await res.json();
@@ -247,12 +297,12 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
 
     // Send to backend
     try {
-      const token = localStorage.getItem('dms_token');
+      const authToken = token || localStorage.getItem('dms_token');
       const res = await fetch('http://localhost:5000/api/activity-logs', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {})
         },
         body: JSON.stringify({
           action: log.action,
@@ -278,10 +328,10 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const addDocument = (doc: Omit<Document, 'id'>): Document => {
+  const addDocument = (doc: Omit<Document, 'id'> & { id?: string }): Document => {
     const newDoc: Document = {
       ...doc,
-      id: `doc-${Date.now()}`
+      id: doc.id || `doc-${Date.now()}`
     };
     setDocuments((prev) => [newDoc, ...prev]);
     return newDoc;
@@ -300,21 +350,26 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
   const approveDocument = async (id: string, approvedBy: string) => {
     updateDocument(id, { status: 'approved', approvedBy });
     try {
-      const token = localStorage.getItem('dms_token');
-      await fetch(`http://localhost:5000/api/documents/${id}/approve`, {
+      const authToken = token || localStorage.getItem('dms_token');
+      const res = await fetch(`http://localhost:5000/api/documents/${id}/approve`, {
         method: 'PATCH',
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) }
       });
+      if (!res.ok) {
+        console.error('Approve failed on server, status:', res.status);
+        // Re-sync from DB to get correct state
+        await fetchDocuments();
+      }
     } catch (err) { console.error('Failed to approve document on server:', err); }
   };
 
   const rejectDocument = async (id: string, reason: string, rejectedBy: string) => {
     updateDocument(id, { status: 'rejected', rejectionReason: reason, approvedBy: rejectedBy });
     try {
-      const token = localStorage.getItem('dms_token');
+      const authToken = token || localStorage.getItem('dms_token');
       await fetch(`http://localhost:5000/api/documents/${id}/reject`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json', ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) },
         body: JSON.stringify({ reason })
       });
     } catch (err) { console.error('Failed to reject document on server:', err); }
@@ -323,10 +378,10 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
   const trashDocument = async (id: string) => {
     updateDocument(id, { status: 'trashed', trashedAt: new Date().toISOString() });
     try {
-      const token = localStorage.getItem('dms_token');
+      const authToken = token || localStorage.getItem('dms_token');
       await fetch(`http://localhost:5000/api/documents/${id}/trash`, {
         method: 'PATCH',
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) }
       });
     } catch (err) { console.error('Failed to trash document on server:', err); }
   };
@@ -334,10 +389,10 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
   const restoreDocument = async (id: string) => {
     updateDocument(id, { status: 'approved', trashedAt: undefined, archivedAt: undefined });
     try {
-      const token = localStorage.getItem('dms_token');
+      const authToken = token || localStorage.getItem('dms_token');
       await fetch(`http://localhost:5000/api/documents/${id}/restore`, {
         method: 'PATCH',
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) }
       });
     } catch (err) { console.error('Failed to restore document on server:', err); }
   };
@@ -345,10 +400,10 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
   const archiveDocument = async (id: string) => {
     updateDocument(id, { status: 'archived', archivedAt: new Date().toISOString(), retentionDays: 30 });
     try {
-      const token = localStorage.getItem('dms_token');
+      const authToken = token || localStorage.getItem('dms_token');
       await fetch(`http://localhost:5000/api/documents/${id}/archive`, {
         method: 'PATCH',
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) }
       });
     } catch (err) { console.error('Failed to archive document on server:', err); }
   };
@@ -356,10 +411,10 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
   const permanentlyDelete = async (id: string) => {
     deleteDocument(id);
     try {
-      const token = localStorage.getItem('dms_token');
+      const authToken = token || localStorage.getItem('dms_token');
       await fetch(`http://localhost:5000/api/documents/${id}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) }
       });
     } catch (err) { console.error('Failed to permanently delete document on server:', err); }
   };
@@ -382,13 +437,13 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
   // 🔹 CREATE FOLDER (API)
   const addFolder = async (folder: Omit<Folder, 'id' | 'createdAt'>) => {
     try {
-      const token = localStorage.getItem("dms_token");
+      const authToken = token || localStorage.getItem("dms_token");
 
       const res = await fetch("http://localhost:5000/api/folders", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {})
         },
         body: JSON.stringify({
           name: folder.name,
@@ -416,10 +471,28 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
     );
   };
 
-  const deleteFolder = (id: string) => {
-    setFolders((prev) =>
-      prev.filter((f) => f.id !== id && f.parentId !== id)
-    );
+  const deleteFolder = async (id: string) => {
+    try {
+      const token = localStorage.getItem('dms_token');
+      const res = await fetch(`http://localhost:5000/api/folders/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+      });
+      const body = await res.json().catch(() => ({}));
+      if (res.status === 202) {
+        // Delete approval requested
+        return { ok: false, status: res.status, message: body.message || 'Delete approval requested', request: body.request };
+      }
+      if (!res.ok) {
+        return { ok: false, status: res.status, error: body.error || `Failed to delete folder (status ${res.status})` };
+      }
+      // Success — remove from local state
+      setFolders((prev) => prev.filter((f) => f.id !== id && f.parentId !== id));
+      return { ok: true, status: res.status, message: body.message || 'Folder deleted', folder: body.folder };
+    } catch (err) {
+      console.error('Failed to delete folder on server:', err);
+      return { ok: false, status: 500, error: 'Failed to delete folder. Please try again.' };
+    }
   };
 
   return (

@@ -47,6 +47,7 @@ export function useNotifications() {
 
 export function NotificationProvider({ children }: { children: ReactNode }) {
   const { token, user } = useAuth();
+  const { refreshCurrentUser } = useAuth();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -70,6 +71,17 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         const data: Notification[] = await res.json();
         setNotifications(data);
         setUnreadCount(data.filter((n) => !n.isRead).length);
+        // If there's a new assignment notification, trigger folders refresh
+        const hasAssignment = data.some((n) => !n.isRead && (n.type === 'assignment' || /assigned to department/i.test(n.title)));
+        if (hasAssignment) {
+          // Refresh the current user's profile (in case department changed), then refresh folders
+          try {
+            await refreshCurrentUser?.();
+          } catch (e) {
+            // ignore
+          }
+          window.dispatchEvent(new Event('dms-folders-refresh'));
+        }
       }
     } catch (err) {
       console.error('fetchNotifications error:', err);

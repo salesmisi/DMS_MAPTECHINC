@@ -11,6 +11,7 @@ import {
   Plus,
   Folder } from
 'lucide-react';
+import { Lock } from 'lucide-react';
 import { useDocuments } from '../context/DocumentContext';
 import { useAuth } from '../context/AuthContext';
 import { useNavigation } from '../App';
@@ -43,8 +44,8 @@ export function FolderManagement() {
     return folders.filter((folder) => {
       const vis = (folder as any).visibility || 'private';
       if (vis === 'admin-only') return false;
-      if (user.role === 'manager') return folder.department === user.department;
-      if (user.role === 'staff') return folder.createdById === user.id;
+      if (vis === 'department') return String(folder.department || '').trim().toLowerCase() === String(user.department || '').trim().toLowerCase();
+      if (vis === 'private') return folder.createdById === user.id;
       return false;
     });
   }, [folders, user]);
@@ -63,7 +64,10 @@ export function FolderManagement() {
     }
     const dept = user?.role === 'staff' ? user.department : newFolder.department;
     const defaultPerms = user?.role === 'staff' ? ['admin', 'manager'] : ['admin', 'manager', 'staff'];
-    const visibility = user?.role === 'admin' ? 'admin-only' : user?.role === 'staff' ? 'private' : 'department';
+    // If admin creates a folder and assigned a department, make it department-visible.
+    let visibility = 'admin-only';
+    if (user?.role === 'staff') visibility = 'private';
+    else if (newFolder.department && String(newFolder.department).trim() !== '') visibility = 'department';
     addFolder({
       name: newFolder.name,
       parentId: newFolder.parentId,
@@ -104,19 +108,37 @@ export function FolderManagement() {
     setDeleteTarget({ id, name, childCount: children.length });
   };
   const confirmDelete = () => {
-    if (!deleteTarget) return;
-    deleteFolder(deleteTarget.id);
-    addLog({
-      userId: user?.id || '',
-      userName: user?.name || '',
-      userRole: user?.role || '',
-      action: 'FOLDER_DELETED',
-      target: deleteTarget.name,
-      targetType: 'folder',
-      timestamp: new Date().toISOString(),
-      ipAddress: '192.168.1.100'
-    });
-    setDeleteTarget(null);
+    (async () => {
+      if (!deleteTarget) return;
+      const res = await deleteFolder(deleteTarget.id);
+      if (res && res.ok) {
+        addLog({
+          userId: user?.id || '',
+          userName: user?.name || '',
+          userRole: user?.role || '',
+          action: 'FOLDER_DELETED',
+          target: deleteTarget.name,
+          targetType: 'folder',
+          timestamp: new Date().toISOString(),
+          ipAddress: '192.168.1.100'
+        });
+      } else if (res && res.status === 202) {
+        addLog({
+          userId: user?.id || '',
+          userName: user?.name || '',
+          userRole: user?.role || '',
+          action: 'DELETE_REQUESTED',
+          target: deleteTarget.name,
+          targetType: 'folder',
+          timestamp: new Date().toISOString(),
+          ipAddress: '192.168.1.100'
+        });
+        alert(res.message || 'Delete approval requested');
+      } else {
+        alert(res?.error || 'Failed to delete folder');
+      }
+      setDeleteTarget(null);
+    })();
   };
   const deptList = [
   'Accounting',
@@ -136,6 +158,10 @@ export function FolderManagement() {
     const isExpanded = expandedFolders.includes(folder.id);
     const isRenaming = renamingId === folder.id;
     const { navigate, selectFolder } = useNavigation();
+    const isDepartment = (folder as any).is_department || (folder as any).isDepartment || false;
+    const canRename = !(isDepartment && user?.role !== 'admin');
+    const canDelete = !(isDepartment && user?.role !== 'admin') && (user?.role === 'admin' || folder.createdById === user?.id);
+
     return (
       <div>
         <div
@@ -200,6 +226,11 @@ export function FolderManagement() {
                 className="flex-1 text-left text-sm text-gray-800 font-medium">
                 {folder.name}
               </button>
+                {isDepartment && (
+                  <span className="ml-2 text-xs text-gray-400 flex items-center" title="Department Folder — protected">
+                    <Lock size={12} />
+                  </span>
+                )}
               <span className="text-xs text-gray-400 hidden group-hover:inline">
                 {folder.department}
               </span>
@@ -225,16 +256,18 @@ export function FolderManagement() {
 
                 <FolderPlus size={14} />
               </button>
-              <button
-              onClick={() => {
-                setRenamingId(folder.id);
-                setRenameValue(folder.name);
-              }}
-              className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
-              title="Rename">
+              {canRename && (
+                <button
+                onClick={() => {
+                  setRenamingId(folder.id);
+                  setRenameValue(folder.name);
+                }}
+                className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                title="Rename">
 
-                <Edit2 size={14} />
-              </button>
+                  <Edit2 size={14} />
+                </button>
+              )}
               <button
               onClick={() => setShowPermModal(folder.id)}
               className="p-1 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors"
@@ -242,13 +275,15 @@ export function FolderManagement() {
 
                 <Shield size={14} />
               </button>
-              <button
-              onClick={() => handleDelete(folder.id, folder.name)}
-              className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-              title="Delete">
+              {canDelete && (
+                <button
+                onClick={() => handleDelete(folder.id, folder.name)}
+                className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                title="Delete">
 
-                <Trash2 size={14} />
-              </button>
+                  <Trash2 size={14} />
+                </button>
+              )}
             </div>
           }
         </div>

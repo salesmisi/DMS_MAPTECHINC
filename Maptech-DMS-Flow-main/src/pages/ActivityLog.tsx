@@ -27,10 +27,12 @@ export function ActivityLog() {
     DOCUMENT_TRASHED: 'bg-red-100 text-red-600',
     DOCUMENT_RESTORED: 'bg-teal-100 text-teal-700',
     DOCUMENT_PERMANENTLY_DELETED: 'bg-red-200 text-red-800',
-    FOLDER_CREATED: 'bg-teal-100 text-teal-700',
+    FOLDER_CREATED: 'bg-blue-100 text-blue-700',
     FOLDER_DELETED: 'bg-red-100 text-red-600',
-    USER_CREATED: 'bg-indigo-100 text-indigo-700',
+    USER_CREATED: 'bg-blue-100 text-blue-700',
     USER_DELETED: 'bg-red-100 text-red-700',
+    CREATE_DEPARTMENT: 'bg-blue-100 text-blue-700',
+    DEPARTMENT_DELETED: 'bg-red-100 text-red-700',
     USER_LOGIN: 'bg-gray-100 text-gray-600',
     SCAN_DOCUMENT: 'bg-cyan-100 text-cyan-700'
   };
@@ -100,7 +102,29 @@ export function ActivityLog() {
           </p>
         </div>
         <button
-          onClick={() => alert('CSV export would download the activity log.')}
+          onClick={() => {
+            const headers = ['Timestamp', 'User', 'Role', 'Action', 'Target', 'Target Type', 'IP Address', 'Details'];
+            const rows = filtered.map((log) => [
+              log.timestamp,
+              log.userName,
+              log.userRole,
+              log.action,
+              log.target,
+              log.targetType,
+              log.ipAddress || '',
+              log.details || ''
+            ].map((v) => '"' + String(v).replace(/"/g, '""') + '"').join(','));
+            const csv = [headers.join(','), ...rows].join('\n');
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'activity-log-' + new Date().toISOString().split('T')[0] + '.csv';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+          }}
           className="flex items-center gap-2 px-4 py-2 bg-[#C0B87A] text-[#005F02] text-sm font-semibold rounded-xl hover:bg-[#F2E3BB] transition-colors">
 
           <Download size={16} />

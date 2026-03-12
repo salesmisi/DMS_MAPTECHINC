@@ -28,6 +28,9 @@ import FilePreview from '../components/FilePreview';
 import { useNavigation } from '../App';
 
 // Recursive folder tree item component
+const DT_INDENT = 10;
+const DT_MAX = 6;
+
 interface FolderTreeItemProps {
   folder: { id: string; name: string; parentId: string | null };
   selectedFolder: string | null;
@@ -38,72 +41,99 @@ interface FolderTreeItemProps {
 }
 
 function FolderTreeItem({ folder, selectedFolder, selectFolder, getChildren, onCreateSubfolder, level }: FolderTreeItemProps) {
-  const [expanded, setExpanded] = React.useState(true);
+  const [expanded, setExpanded] = React.useState(level < 2);
   const [deleteModal, setDeleteModal] = React.useState(false);
-  const { deleteFolder } = useDocuments();
+  const { deleteFolder, folders } = useDocuments();
+  const { user } = useAuth();
   const children = getChildren(folder.id);
   const hasChildren = children.length > 0;
-  const paddingLeft = 8 + level * 16;
+  const isSelected = selectedFolder === folder.id;
+  const depth = Math.min(level, DT_MAX);
+  // Find the full folder object to check isDepartment
+  const fullFolder = folders.find(f => f.id === folder.id) || (folder as any);
+  const isDepartment = fullFolder.isDepartment || fullFolder.is_department;
+  // Only admin can delete/rename department folders
+  const canDelete = !isDepartment || (user && user.role === 'admin');
 
   return (
-    <div>
+    <div className="ft-node">
       <div
-        className={`flex items-center gap-1 rounded text-sm transition-colors group ${
-          selectedFolder === folder.id ? 'bg-[#427A43] text-white' : 'text-gray-600 hover:bg-gray-100'
+        className={`ft-row group ${
+          isSelected ? 'bg-[#427A43] text-white' : 'text-gray-600 hover:bg-gray-100'
         }`}
-        style={{ paddingLeft: `${paddingLeft}px` }}
+        style={{ paddingLeft: `${4 + depth * DT_INDENT}px` }}
       >
+        {/* Guide lines */}
+        {Array.from({ length: depth }, (_, i) => (
+          <span key={i} className="ft-guide" style={{ left: `${4 + (i + 1) * DT_INDENT - 5}px` }} />
+        ))}
+
         {hasChildren ? (
-          <button
-            onClick={() => setExpanded(!expanded)}
-            className="p-0.5 hover:bg-black/10 rounded"
-          >
+          <button onClick={() => setExpanded(!expanded)} className="ft-chevron">
             {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
           </button>
         ) : (
-          <span className="w-4" />
+          <span className="ft-spacer" />
         )}
+
         <button
-          onClick={() => selectFolder && selectFolder(folder.id === selectedFolder ? null : folder.id)}
-          className="flex-1 text-left py-1.5 flex items-center gap-1.5 truncate"
+          onClick={() => selectFolder && selectFolder(isSelected ? null : folder.id)}
+          className="ft-name-btn"
         >
-          <FolderOpen size={14} />
-          <span className="truncate">{folder.name}</span>
+          <FolderOpen size={14} className="ft-icon" />
+          <span className="ft-label" title={folder.name}>{folder.name}</span>
+          {isDepartment && (
+            <span className="ml-2 text-xs text-gray-400 flex items-center" title="Department Folder — protected">
+              <Lock size={12} />
+            </span>
+          )}
         </button>
+
         <button
           onClick={(e) => { e.stopPropagation(); onCreateSubfolder(folder.id); }}
-          className={`p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity ${
-            selectedFolder === folder.id ? 'hover:bg-white/20 text-white' : 'hover:bg-gray-200 text-gray-500'
+          className={`ft-action ${
+            isSelected ? 'hover:bg-white/20 text-white' : 'hover:bg-gray-200 text-gray-500'
           }`}
           title="Create subfolder"
         >
           <Plus size={12} />
         </button>
-        <button
-          onClick={(e) => { e.stopPropagation(); setDeleteModal(true); }}
-          className={`p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity ${
-            selectedFolder === folder.id ? 'hover:bg-white/20 text-white' : 'hover:bg-red-100 text-red-400'
-          }`}
-          title="Delete folder"
-        >
-          <Trash2 size={12} />
-        </button>
+        {canDelete && (
+          <button
+            onClick={(e) => { e.stopPropagation(); setDeleteModal(true); }}
+            className={`ft-action ${
+              isSelected ? 'hover:bg-white/20 text-white' : 'hover:bg-red-100 text-red-400'
+            }`}
+            title="Delete folder"
+          >
+            <Trash2 size={12} />
+          </button>
+        )}
       </div>
+
       {deleteModal && (
         <DeleteFolderModal
           folderName={folder.name}
           hasChildren={hasChildren}
           childCount={children.length}
           onConfirm={() => {
-            if (selectedFolder === folder.id) selectFolder && selectFolder(null);
-            deleteFolder(folder.id);
-            setDeleteModal(false);
+            (async () => {
+              if (isSelected) selectFolder && selectFolder(null);
+              const res = await deleteFolder(folder.id);
+              if (res && res.status === 202) {
+                alert(res.message || 'Delete approval requested');
+              } else if (res && !res.ok) {
+                alert(res.error || 'Failed to delete folder');
+              }
+              setDeleteModal(false);
+            })();
           }}
           onCancel={() => setDeleteModal(false)}
         />
       )}
+
       {expanded && hasChildren && (
-        <div>
+        <div className="ft-children">
           {children.map((child) => (
             <FolderTreeItem
               key={child.id}
@@ -147,7 +177,11 @@ export function DocumentsPage() {
       const vis = (folder as any).visibility || 'private';
       if (vis === 'admin-only') return false;
       if (user.role === 'manager') return folder.department === user.department;
-      if (user.role === 'staff') return folder.createdById === user.id;
+      if (user.role === 'staff') {
+        if (vis === 'department' && String(folder.department || '').trim().toLowerCase() === String(user.department || '').trim().toLowerCase()) return true;
+        if (vis === 'private' && String(folder.createdById || '') === String(user.id || '')) return true;
+        return false;
+      }
       return false;
     });
   }, [folders, user]);
@@ -174,8 +208,8 @@ export function DocumentsPage() {
     if (!user) return false;
     if (user.role === 'admin') return true;
     if (user.role === 'manager') return doc.department === user.department;
-    // staff
-    return doc.uploadedById === user.id;
+    // staff: allow staff to see documents in their department or documents they uploaded
+    return doc.uploadedById === user.id || String(doc.department || '').trim().toLowerCase() === String(user.department || '').trim().toLowerCase();
   };
 
   const filtered = activeDocuments.filter((doc) => {
@@ -257,42 +291,81 @@ export function DocumentsPage() {
       ipAddress: '192.168.1.100'
     });
   };
+  const handleDownload = async (doc: Document) => {
+    try {
+      const token = localStorage.getItem('dms_token');
+      const res = await fetch(`http://localhost:5000/api/documents/${doc.id}/download`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error('Download failed');
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${doc.title}.${doc.fileType}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      addLog({
+        userId: user?.id || '',
+        userName: user?.name || '',
+        userRole: user?.role || '',
+        action: 'DOCUMENT_DOWNLOAD',
+        target: doc.title,
+        targetType: 'document',
+        timestamp: new Date().toISOString(),
+        ipAddress: '192.168.1.100'
+      });
+    } catch (err) {
+      console.error('Download error:', err);
+      alert('Failed to download file.');
+    }
+  };
   return (
     <div className="flex gap-6 h-full">
       {/* Folder Tree Sidebar */}
-      <div className="w-56 flex-shrink-0 bg-white rounded-xl shadow-sm border border-gray-100 p-4 h-fit">
+      <div className="ft-container w-56 flex-shrink-0 bg-white rounded-xl shadow-sm border border-gray-100 p-3">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
             <FolderOpen size={16} className="text-[#427A43]" />
             Folders
           </h3>
-          <button
-            onClick={() => setShowCreateFolder(true)}
-            className="p-1 rounded-md bg-[#005F02] text-white hover:bg-[#427A43] transition-colors"
-            title="Create Folder">
-            <Plus size={14} />
-          </button>
+            {user?.role !== 'staff' && (
+              <button
+                onClick={() => setShowCreateFolder(true)}
+                className="p-1 rounded-md bg-[#005F02] text-white hover:bg-[#427A43] transition-colors"
+                title="Create Folder">
+                <Plus size={14} />
+              </button>
+            )}
         </div>
-        <button
+        <div
+          className={`ft-row cursor-pointer mb-1 ${
+            !selectedFolder ? 'bg-[#005F02] text-white' : 'text-gray-600 hover:bg-gray-100'
+          }`}
+          style={{ paddingLeft: '4px' }}
           onClick={() => selectFolder && selectFolder(null)}
-          className={`w-full text-left px-2 py-1.5 rounded text-sm mb-1 transition-colors ${!selectedFolder ? 'bg-[#005F02] text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
-
-          All Documents
-        </button>
-        {rootFolders.map((folder) =>
-        <FolderTreeItem
-          key={folder.id}
-          folder={folder}
-          selectedFolder={selectedFolder}
-          selectFolder={selectFolder}
-          getChildren={getChildren}
-          onCreateSubfolder={(parentId) => {
-            setNewFolderParentId(parentId);
-            setShowCreateFolder(true);
-          }}
-          level={0}
-        />
-        )}
+        >
+          <FolderOpen size={14} className="ft-icon" />
+          <span className="ft-label">All Documents</span>
+        </div>
+        <div className="ft-scroll">
+          {rootFolders.map((folder) =>
+          <FolderTreeItem
+            key={folder.id}
+            folder={folder}
+            selectedFolder={selectedFolder}
+            selectFolder={selectFolder ?? null}
+            getChildren={getChildren}
+            onCreateSubfolder={(parentId) => {
+              setNewFolderParentId(parentId);
+              setShowCreateFolder(true);
+            }}
+            level={0}
+          />
+          )}
+        </div>
       </div>
 
       {/* Main Content */}
@@ -473,18 +546,7 @@ export function DocumentsPage() {
                             <Eye size={15} />
                           </button>
                           <button
-                      onClick={() =>
-                      addLog({
-                        userId: user?.id || '',
-                        userName: user?.name || '',
-                        userRole: user?.role || '',
-                        action: 'DOCUMENT_DOWNLOAD',
-                        target: doc.title,
-                        targetType: 'document',
-                        timestamp: new Date().toISOString(),
-                        ipAddress: '192.168.1.100'
-                      })
-                      }
+                      onClick={() => handleDownload(doc)}
                       className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
                       title="Download">
 
@@ -551,18 +613,7 @@ export function DocumentsPage() {
                     View
                   </button>
                   <button
-                onClick={() =>
-                addLog({
-                  userId: user?.id || '',
-                  userName: user?.name || '',
-                  userRole: user?.role || '',
-                  action: 'DOCUMENT_DOWNLOAD',
-                  target: doc.title,
-                  targetType: 'document',
-                  timestamp: new Date().toISOString(),
-                  ipAddress: '192.168.1.100'
-                })
-                }
+                onClick={() => handleDownload(doc)}
                 className="flex-1 py-1.5 text-xs text-blue-600 hover:bg-blue-50 rounded transition-colors">
 
                     Download
@@ -735,16 +786,7 @@ export function DocumentsPage() {
             <div className="p-6 pt-0 flex gap-3">
               <button
               onClick={() => {
-                addLog({
-                  userId: user?.id || '',
-                  userName: user?.name || '',
-                  userRole: user?.role || '',
-                  action: 'DOCUMENT_DOWNLOAD',
-                  target: viewingDoc.title,
-                  targetType: 'document',
-                  timestamp: new Date().toISOString(),
-                  ipAddress: '192.168.1.100'
-                });
+                handleDownload(viewingDoc);
                 setViewingDoc(null);
               }}
               className="flex-1 py-2.5 bg-[#005F02] text-white text-sm font-medium rounded-lg hover:bg-[#427A43] transition-colors">

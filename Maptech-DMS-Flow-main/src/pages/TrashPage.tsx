@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Trash2, RotateCcw, AlertTriangle, Clock, Search } from 'lucide-react';
 import { useDocuments } from '../context/DocumentContext';
 import { useAuth } from '../context/AuthContext';
@@ -22,6 +22,7 @@ export function TrashPage() {
   const filtered = trashed.filter(
     (d) => !search || d.title.toLowerCase().includes(search.toLowerCase())
   );
+  //retention////////////////////////////////////////////////////////////////////////////////////
   const getDaysRemaining = (trashedAt?: string) => {
     if (!trashedAt) return 30;
     const daysElapsed = Math.floor(
@@ -29,6 +30,21 @@ export function TrashPage() {
     );
     return Math.max(0, 30 - daysElapsed);
   };
+
+  // Auto-delete trashed documents after 30 days
+  const deletedIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const trashedDocs = documents.filter((d) => d.status === 'trashed');
+    trashedDocs.forEach((doc) => {
+      if (deletedIdsRef.current.has(doc.id)) return;
+      const daysRemaining = getDaysRemaining(doc.trashedAt);
+      if (daysRemaining === 0) {
+        deletedIdsRef.current.add(doc.id);
+        permanentlyDelete(doc.id);
+      }
+    });
+  }, [documents]);
+
   const handleRestore = (doc: (typeof documents)[0]) => {
     restoreDocument(doc.id);
     addLog({

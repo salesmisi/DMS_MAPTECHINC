@@ -43,8 +43,7 @@ export function UserManagement() {
     status: 'active' as 'active' | 'inactive'
   });
   const [newDept, setNewDept] = useState({
-    name: '',
-    description: ''
+    name: ''
   });
 
   // Fetch departments from API on mount
@@ -84,13 +83,15 @@ export function UserManagement() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ name: newDept.name, description: newDept.description })
+            body: JSON.stringify({ name: newDept.name })
       });
       if (res.ok) {
         const data = await res.json();
         setDepartments((prev) => [...prev, data.department]);
-        setNewDept({ name: '', description: '' });
+            setNewDept({ name: '' });
         setShowAddDept(false);
+        // Refresh folders so the newly-created department folder is available
+        window.dispatchEvent(new Event('dms-folders-refresh'));
       } else {
         const errData = await res.json();
         alert(errData.error || 'Failed to create department');
@@ -533,23 +534,7 @@ export function UserManagement() {
                 className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#427A43]" />
 
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  Description
-                </label>
-                <textarea
-                value={newDept.description}
-                onChange={(e) =>
-                setNewDept((prev) => ({
-                  ...prev,
-                  description: e.target.value
-                }))
-                }
-                placeholder="Department description..."
-                rows={3}
-                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#427A43] resize-none" />
-
-              </div>
+              {/* Description removed: only department name is required */}
             </div>
             <div className="p-6 pt-0 flex gap-3">
               <button

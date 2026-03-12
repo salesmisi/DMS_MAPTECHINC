@@ -8,13 +8,16 @@ import {
   Settings,
   LogOut,
   FileText,
-  CheckCheck } from
+  CheckCheck,
+  Sun,
+  Moon } from
 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigation, PageName } from '../App';
 import { useDocuments } from '../context/DocumentContext';
 import { useNotifications } from '../context/NotificationContext';
 import { hasApprovalAccess } from '../utils/roles';
+import { useTheme } from '../context/ThemeContext';
 interface HeaderProps {
   onMenuToggle: () => void;
   currentPage: PageName;
@@ -38,6 +41,7 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
   const { navigate } = useNavigation();
   const { documents } = useDocuments();
   const { notifications: dbNotifications, unreadCount, markAsRead, markAllAsRead } = useNotifications();
+  const { theme, toggleTheme } = useTheme();
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -78,27 +82,27 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
     staff: 'Staff'
   };
   return (
-    <header className="bg-white border-b-2 border-[#427A43] px-4 py-3 flex items-center gap-4 z-10 flex-shrink-0">
+    <header className="bg-white dark:bg-[#1e1e1e] border-b-2 border-[#427A43] px-4 py-3 flex items-center gap-4 z-10 flex-shrink-0">
       {/* Menu Toggle */}
       <button
         onClick={onMenuToggle}
-        className="p-2 rounded-lg hover:bg-gray-100 transition-colors text-gray-600">
+        className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-gray-600 dark:text-gray-300">
 
         <Menu size={20} />
       </button>
 
       {/* Page Title */}
       <div className="flex-1">
-        <h1 className="text-lg font-semibold text-[#005F02]">
+        <h1 className="text-lg font-semibold text-[#005F02] dark:text-[#7bc67e]">
           {pageTitles[currentPage] || 'Dashboard'}
         </h1>
-        <p className="text-xs text-gray-500">
+        <p className="text-xs text-gray-500 dark:text-gray-400">
           Maptech Information Solution Inc. — Document Management System
         </p>
       </div>
 
       {/* Search */}
-      <div className="hidden md:flex items-center gap-2 bg-gray-100 rounded-lg px-3 py-2 w-64">
+      <div className="hidden md:flex items-center gap-2 bg-gray-100 dark:bg-[#2a2a2a] rounded-lg px-3 py-2 w-64">
         <Search size={16} className="text-gray-400" />
         <input
           type="text"
@@ -110,9 +114,17 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
               navigate('documents');
             }
           }}
-          className="bg-transparent text-sm outline-none flex-1 text-gray-700 placeholder-gray-400" />
+          className="bg-transparent text-sm outline-none flex-1 text-gray-700 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500" />
 
       </div>
+
+      {/* Dark Mode Toggle */}
+      <button
+        onClick={toggleTheme}
+        className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-gray-600 dark:text-gray-300"
+        title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}>
+        {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
+      </button>
 
       {/* Notifications */}
       <div className="relative">
@@ -121,7 +133,7 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
             setShowNotifications(!showNotifications);
             setShowUserMenu(false);
           }}
-          className="relative p-2 rounded-lg hover:bg-gray-100 transition-colors text-gray-600">
+          className="relative p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-gray-600 dark:text-gray-300">
 
           <Bell size={20} />
           {isApprover && pendingCount > 0 && (
@@ -133,14 +145,14 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
 
         {showNotifications && (
           isApprover ? (
-            <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-xl shadow-xl border border-gray-200 z-50">
-              <div className="px-4 py-3 border-b border-gray-100">
-                <h3 className="font-semibold text-gray-800">Notifications</h3>
-                <p className="text-xs text-gray-500">{pendingCount} pending approvals</p>
+            <div className="absolute right-0 top-full mt-2 w-80 bg-white dark:bg-[#1e1e1e] rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 z-50">
+              <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-700">
+                <h3 className="font-semibold text-gray-800 dark:text-gray-100">Notifications</h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400">{pendingCount} pending approvals</p>
               </div>
               <div className="max-h-64 overflow-y-auto">
                 {notifications.length === 0 ? (
-                  <div className="px-4 py-6 text-center text-gray-500 text-sm">No new notifications</div>
+                  <div className="px-4 py-6 text-center text-gray-500 dark:text-gray-400 text-sm">No new notifications</div>
                 ) : (
                   notifications.map((n) => (
                     <button
@@ -151,20 +163,20 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
                         navigate('approvals');
                         setShowNotifications(false);
                       }}
-                      className="w-full flex items-start gap-3 px-4 py-3 hover:bg-gray-50 transition-colors text-left">
+                      className="w-full flex items-start gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-left">
                       <div className="w-8 h-8 rounded-full bg-yellow-100 flex items-center justify-center flex-shrink-0 mt-0.5">
                         <FileText size={14} className="text-yellow-600" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm text-gray-800 truncate">{n.message}</p>
-                        <p className="text-xs text-gray-500 mt-0.5">{n.time}</p>
+                        <p className="text-sm text-gray-800 dark:text-gray-200 truncate">{n.message}</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{n.time}</p>
                       </div>
                     </button>
                   ))
                 )}
               </div>
               {notifications.length > 0 && (
-                <div className="px-4 py-2 border-t border-gray-100 flex items-center justify-between">
+                <div className="px-4 py-2 border-t border-gray-100 dark:border-gray-700 flex items-center justify-between">
                   <button
                     onClick={() => {
                       navigate('approvals');
@@ -186,8 +198,8 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
               )}
             </div>
           ) : (
-            <div className="absolute right-0 top-full mt-2 w-64 bg-white rounded-xl shadow-xl border border-gray-200 z-50">
-              <div className="px-4 py-6 text-center text-gray-500 text-sm">No approvals available</div>
+            <div className="absolute right-0 top-full mt-2 w-64 bg-white dark:bg-[#1e1e1e] rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 z-50">
+              <div className="px-4 py-6 text-center text-gray-500 dark:text-gray-400 text-sm">No approvals available</div>
             </div>
           )
         )}
@@ -200,7 +212,7 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
             setShowUserMenu(!showUserMenu);
             setShowNotifications(false);
           }}
-          className="flex items-center gap-2 p-2 rounded-lg hover:bg-gray-100 transition-colors">
+          className="flex items-center gap-2 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
 
           <div
             className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
@@ -212,21 +224,21 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
             {user?.name?.charAt(0).toUpperCase() || 'U'}
           </div>
           <div className="hidden md:block text-left">
-            <p className="text-sm font-medium text-gray-800 leading-tight">
+            <p className="text-sm font-medium text-gray-800 dark:text-gray-200 leading-tight">
               {user?.name}
             </p>
-            <p className="text-xs text-gray-500">
+            <p className="text-xs text-gray-500 dark:text-gray-400">
               {roleLabels[user?.role || 'staff']}
             </p>
           </div>
-          <ChevronDown size={16} className="text-gray-400 hidden md:block" />
+          <ChevronDown size={16} className="text-gray-400 dark:text-gray-500 hidden md:block" />
         </button>
 
         {showUserMenu &&
-        <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-xl shadow-xl border border-gray-200 z-50">
-            <div className="px-4 py-3 border-b border-gray-100">
-              <p className="font-semibold text-gray-800">{user?.name}</p>
-              <p className="text-xs text-gray-500">{user?.email}</p>
+        <div className="absolute right-0 top-full mt-2 w-56 bg-white dark:bg-[#1e1e1e] rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 z-50">
+            <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-700">
+              <p className="font-semibold text-gray-800 dark:text-gray-100">{user?.name}</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">{user?.email}</p>
               <span
               className="inline-block mt-1 px-2 py-0.5 rounded-full text-xs font-medium"
               style={{
@@ -253,7 +265,7 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
                 navigate('profile');
                 setShowUserMenu(false);
               }}
-              className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+              className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
 
                 <User size={16} className="text-gray-400" />
                 My Profile
@@ -263,13 +275,13 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
                 navigate('settings');
                 setShowUserMenu(false);
               }}
-              className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+              className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
 
                 <Settings size={16} className="text-gray-400" />
                 Settings
               </button>
             </div>
-            <div className="border-t border-gray-100 py-1">
+            <div className="border-t border-gray-100 dark:border-gray-700 py-1">
               <button
               onClick={() => {
                 setShowUserMenu(false);

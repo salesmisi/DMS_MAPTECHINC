@@ -45,6 +45,7 @@ async function run() {
         name            VARCHAR(255)  NOT NULL,
         parent_id       UUID          REFERENCES folders(id) ON DELETE CASCADE,
         department      VARCHAR(100)  NOT NULL,
+        is_department   BOOLEAN       NOT NULL DEFAULT FALSE,
         created_by      VARCHAR(150)  NOT NULL,
         created_by_id   UUID          NOT NULL REFERENCES users(id) ON DELETE SET NULL,
         created_by_role VARCHAR(20)   NOT NULL
@@ -104,6 +105,11 @@ async function run() {
   // Add code column to departments if missing
   try {
     await pool.query("ALTER TABLE departments ADD COLUMN IF NOT EXISTS code VARCHAR(10)");
+  } catch (e) { /* ignore if exists */ }
+
+  // Ensure folders table has is_department column
+  try {
+    await pool.query("ALTER TABLE folders ADD COLUMN IF NOT EXISTS is_department BOOLEAN NOT NULL DEFAULT FALSE");
   } catch (e) { /* ignore if exists */ }
 
   await pool.end();

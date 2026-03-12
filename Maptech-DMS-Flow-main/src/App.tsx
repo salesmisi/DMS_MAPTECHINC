@@ -2,6 +2,7 @@ import React, { useState, createContext, useContext } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { DocumentProvider } from './context/DocumentContext';
 import { NotificationProvider } from './context/NotificationContext';
+import { ThemeProvider } from './context/ThemeContext';
 import { LoginPage } from './pages/LoginPage';
 import { AdminDashboard } from './pages/AdminDashboard';
 import { ManagerDashboard } from './pages/ManagerDashboard';
@@ -98,10 +99,7 @@ function AppContent() {
       }}>
 
       <div
-        className="flex h-screen overflow-hidden"
-        style={{
-          backgroundColor: '#EEEEEE'
-        }}>
+        className="flex h-screen overflow-hidden bg-[#EEEEEE] dark:bg-[#121212]">
 
         <Sidebar
           isOpen={sidebarOpen}
@@ -112,7 +110,7 @@ function AppContent() {
             onMenuToggle={() => setSidebarOpen(!sidebarOpen)}
             currentPage={currentPage} />
 
-          <main className="flex-1 overflow-y-auto p-6">{renderPage()}</main>
+          <main className="flex-1 overflow-y-auto p-6 dark:bg-[#121212]">{renderPage()}</main>
         </div>
       </div>
     </NavigationContext.Provider>);
@@ -120,12 +118,14 @@ function AppContent() {
 }
 export function App() {
   return (
-    <AuthProvider>
-      <DocumentProvider>
-        <NotificationProvider>
-          <AppContent />
-        </NotificationProvider>
-      </DocumentProvider>
-    </AuthProvider>);
+    <ThemeProvider>
+      <AuthProvider>
+        <DocumentProvider>
+          <NotificationProvider>
+            <AppContent />
+          </NotificationProvider>
+        </DocumentProvider>
+      </AuthProvider>
+    </ThemeProvider>);
 
 }

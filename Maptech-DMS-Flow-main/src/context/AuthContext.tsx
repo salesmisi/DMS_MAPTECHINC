@@ -21,6 +21,7 @@ interface AuthContextType {
   loading: boolean;
   login: (email: string, password: string) => Promise<boolean>;
   logout: () => void;
+  refreshCurrentUser: () => Promise<void>;
   addUser: (
     userData: Omit<User, 'id' | 'createdAt'> & { password: string }
   ) => Promise<void>;
@@ -84,6 +85,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     } catch (err) {
       console.error('Failed to fetch users:', err);
+    }
+  };
+
+  // 🔹 Refresh current user's data from server (useful when server-side updates occur)
+  const refreshCurrentUser = async () => {
+    try {
+      const stored = localStorage.getItem(CURRENT_USER_KEY);
+      const current = stored ? JSON.parse(stored) : user;
+      if (!current || !token) return;
+      const res = await fetch(`${API_URL}/users/${current.id}`, { headers: authHeaders(token) });
+      if (!res.ok) return;
+      const updated = await res.json();
+      setUser(updated);
+      localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(updated));
+      // Notify other contexts to refresh data for the updated user
+      window.dispatchEvent(new Event('dms-auth-change'));
+    } catch (err) {
+      console.error('refreshCurrentUser error:', err);
     }
   };
 
@@ -163,6 +182,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (user?.id === id) {
         setUser(updated);
         localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(updated));
+        // Notify other contexts to refresh data for the updated user
+        window.dispatchEvent(new Event('dms-auth-change'));
       }
     } catch (err) {
       console.error('updateUser error:', err);
@@ -224,6 +245,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         deleteUser,
         resetPassword,
         fetchUsers,
+        refreshCurrentUser,
       }}
     >
       {children}
