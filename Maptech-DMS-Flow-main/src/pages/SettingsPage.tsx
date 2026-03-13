@@ -2,9 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
-import { Bell, Moon, Globe, Shield, Smartphone, Monitor } from 'lucide-react';
+import { Bell, Globe, Shield, Smartphone, Monitor } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import { useLanguage } from '../context/LanguageContext';
 export function SettingsPage() {
   const { changePassword, logout } = useAuth();
   const [notifications, setNotifications] = useState({
@@ -18,6 +19,39 @@ export function SettingsPage() {
     theme: theme || 'light',
     density: 'comfortable'
   });
+  const LANG_KEY = 'dms_language';
+  const TZ_KEY = 'dms_timezone';
+
+  const { t, setLang, lang } = useLanguage();
+
+  const [language, setLanguage] = useState<string>(() => {
+    const stored = localStorage.getItem(LANG_KEY);
+    if (stored) return stored;
+    return lang === 'tl' ? 'Tagalog' : 'English (US)';
+  });
+  const [timezone, setTimezone] = useState<string>(() => {
+    return localStorage.getItem(TZ_KEY) || 'Pacific Time (US & Canada)';
+  });
+
+  useEffect(() => {
+    // persist language/timezone selections
+    localStorage.setItem(LANG_KEY, language);
+    localStorage.setItem(TZ_KEY, timezone);
+    // apply document language for simple cases
+    if (language === 'Tagalog') {
+      document.documentElement.lang = 'tl';
+      setLang('tl');
+    } else {
+      document.documentElement.lang = 'en';
+      setLang('en');
+    }
+    // expose timezone on window for other parts of the app if needed
+    try {
+      (window as any).DMS_TIMEZONE = timezone;
+    } catch (e) {
+      // ignore
+    }
+  }, [language, timezone]);
   // keep appearance.theme in sync with ThemeContext
   useEffect(() => {
     setAppearance((prev) => ({ ...prev, theme: theme }));
@@ -28,13 +62,12 @@ export function SettingsPage() {
       [key]: !prev[key]
     }));
   };
+
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <div className="mb-6">
-        <h2 className="text-2xl font-bold text-gray-900">Settings</h2>
-        <p className="text-gray-500">
-          Manage your application preferences and configuration
-        </p>
+        <h2 className="text-2xl font-bold text-gray-900">{t('settings')}</h2>
+        <p className="text-gray-500">{t('settingsDescription')}</p>
       </div>
 
       {/* Notifications Section */}
@@ -44,22 +77,16 @@ export function SettingsPage() {
             <Bell className="text-blue-600" size={24} />
           </div>
           <div>
-            <h3 className="text-lg font-semibold text-gray-900">
-              Notifications
-            </h3>
-            <p className="text-sm text-gray-500">
-              Choose how you want to be notified
-            </p>
+            <h3 className="text-lg font-semibold text-gray-900">{t('notifications')}</h3>
+            <p className="text-sm text-gray-500">{t('notificationsDescription')}</p>
           </div>
         </div>
 
         <div className="space-y-4">
           <div className="flex items-center justify-between py-3 border-b border-gray-100">
             <div>
-              <p className="font-medium text-gray-900">Email Notifications</p>
-              <p className="text-sm text-gray-500">
-                Receive daily summaries and important alerts
-              </p>
+              <p className="font-medium text-gray-900">{t('emailNotificationsTitle')}</p>
+              <p className="text-sm text-gray-500">{t('emailNotificationsDesc')}</p>
             </div>
             <label className="relative inline-flex items-center cursor-pointer">
               <input
@@ -74,10 +101,8 @@ export function SettingsPage() {
 
           <div className="flex items-center justify-between py-3 border-b border-gray-100">
             <div>
-              <p className="font-medium text-gray-900">Browser Notifications</p>
-              <p className="text-sm text-gray-500">
-                Show popup notifications when online
-              </p>
+              <p className="font-medium text-gray-900">{t('browserNotificationsTitle')}</p>
+              <p className="text-sm text-gray-500">{t('browserNotificationsDesc')}</p>
             </div>
             <label className="relative inline-flex items-center cursor-pointer">
               <input
@@ -92,10 +117,8 @@ export function SettingsPage() {
 
           <div className="flex items-center justify-between py-3">
             <div>
-              <p className="font-medium text-gray-900">Approval Requests</p>
-              <p className="text-sm text-gray-500">
-                Notify me when documents need approval
-              </p>
+              <p className="font-medium text-gray-900">{t('approvalRequestsTitle')}</p>
+              <p className="text-sm text-gray-500">{t('approvalRequestsDesc')}</p>
             </div>
             <label className="relative inline-flex items-center cursor-pointer">
               <input
@@ -114,13 +137,10 @@ export function SettingsPage() {
       <Card className="p-6">
         <div className="flex items-center gap-3 mb-6">
           <div className="p-2 bg-purple-50 rounded-lg">
-            <Moon className="text-purple-600" size={24} />
           </div>
           <div>
-            <h3 className="text-lg font-semibold text-gray-900">Appearance</h3>
-            <p className="text-sm text-gray-500">
-              Customize how the application looks
-            </p>
+            <h3 className="text-lg font-semibold text-gray-900">{t('appearance')}</h3>
+            <p className="text-sm text-gray-500">{t('appearanceDescription')}</p>
           </div>
         </div>
 
@@ -133,7 +153,7 @@ export function SettingsPage() {
             className={`p-4 border-2 rounded-xl flex flex-col items-center gap-3 transition-all ${appearance.theme === 'light' ? 'border-purple-600 bg-purple-50' : 'border-gray-200 hover:border-gray-300'}`}>
 
             <div className="w-full h-24 bg-white border border-gray-200 rounded-lg shadow-sm"></div>
-            <span className="font-medium text-gray-900">Light Mode</span>
+            <span className="font-medium text-gray-900">{t('lightMode')}</span>
           </button>
 
           <button
@@ -144,7 +164,7 @@ export function SettingsPage() {
             className={`p-4 border-2 rounded-xl flex flex-col items-center gap-3 transition-all ${appearance.theme === 'dark' ? 'border-purple-600 bg-purple-50' : 'border-gray-200 hover:border-gray-300'}`}>
 
             <div className="w-full h-24 bg-gray-900 border border-gray-700 rounded-lg shadow-sm"></div>
-            <span className="font-medium text-gray-900">Dark Mode</span>
+            <span className="font-medium text-gray-900">{t('darkMode')}</span>
           </button>
 
           <button
@@ -155,7 +175,7 @@ export function SettingsPage() {
             className={`p-4 border-2 rounded-xl flex flex-col items-center gap-3 transition-all ${appearance.theme === 'system' ? 'border-purple-600 bg-purple-50' : 'border-gray-200 hover:border-gray-300'}`}>
 
             <div className="w-full h-24 bg-gradient-to-r from-white to-gray-900 border border-gray-200 rounded-lg shadow-sm"></div>
-            <span className="font-medium text-gray-900">System</span>
+            <span className="font-medium text-gray-900">{t('system')}</span>
           </button>
         </div>
       </Card>
@@ -167,34 +187,31 @@ export function SettingsPage() {
             <Globe className="text-green-600" size={24} />
           </div>
           <div>
-            <h3 className="text-lg font-semibold text-gray-900">Regional</h3>
-            <p className="text-sm text-gray-500">
-              Language and timezone preferences
-            </p>
+            <h3 className="text-lg font-semibold text-gray-900">{t('regional')}</h3>
+            <p className="text-sm text-gray-500">{t('regional')}</p>
           </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Language
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+              {t('language')}
             </label>
-            <select className="w-full h-10 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+            <select value={language} onChange={(e) => setLanguage(e.target.value)} className="w-full h-10 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
               <option>English (US)</option>
-              <option>Spanish</option>
-              <option>French</option>
-              <option>German</option>
+              <option>Tagalog</option>
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Timezone
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+              {t('timezone')}
             </label>
-            <select className="w-full h-10 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+            <select value={timezone} onChange={(e) => setTimezone(e.target.value)} className="w-full h-10 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
               <option>Pacific Time (US & Canada)</option>
               <option>Eastern Time (US & Canada)</option>
               <option>London (GMT)</option>
               <option>Tokyo (JST)</option>
+              <option>Philippine Time (PHT)</option>
             </select>
           </div>
         </div>
@@ -207,8 +224,8 @@ export function SettingsPage() {
             <Shield className="text-gray-600" size={24} />
           </div>
           <div>
-            <h3 className="text-lg font-semibold text-gray-900">Security</h3>
-            <p className="text-sm text-gray-500">Change your password</p>
+            <h3 className="text-lg font-semibold text-gray-900">{t('security')}</h3>
+            <p className="text-sm text-gray-500">{t('securityDesc')}</p>
           </div>
         </div>
 
@@ -221,10 +238,8 @@ export function SettingsPage() {
             <Shield className="text-orange-600" size={24} />
           </div>
           <div>
-            <h3 className="text-lg font-semibold text-gray-900">
-              Active Sessions
-            </h3>
-            <p className="text-sm text-gray-500">Manage your active sessions</p>
+            <h3 className="text-lg font-semibold text-gray-900">{t('activeSessions')}</h3>
+            <p className="text-sm text-gray-500">{t('manageActiveSessions')}</p>
           </div>
         </div>
 
@@ -240,7 +255,7 @@ export function SettingsPage() {
               </div>
             </div>
             <span className="px-2 py-1 bg-green-100 text-green-700 text-xs font-medium rounded-full">
-              Current
+              {t('current') || 'Current'}
             </span>
           </div>
 
@@ -255,21 +270,22 @@ export function SettingsPage() {
               </div>
             </div>
             <Button variant="outline" size="sm">
-              Revoke
+              {t('revoke')}
             </Button>
           </div>
         </div>
       </Card>
 
       <div className="flex justify-end gap-3">
-        <Button variant="outline">Cancel</Button>
-        <Button>Save Preferences</Button>
+        <Button variant="outline">{t('cancel')}</Button>
+        <Button>{t('savePreferences')}</Button>
       </div>
     </div>);
 
 }
 
 function SecurityForm({ changePassword, logout }: { changePassword: (c:string,n:string)=>Promise<boolean>; logout: ()=>void }) {
+  const { t } = useLanguage();
   const [formData, setFormData] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
   const [passwordMessage, setPasswordMessage] = useState('');
   const [passwordMsgType, setPasswordMsgType] = useState<'error'|'success'|''>('');
@@ -311,16 +327,16 @@ function SecurityForm({ changePassword, logout }: { changePassword: (c:string,n:
         </div>
       )}
 
-      <Input label="Current Password" name="currentPassword" type="password" value={formData.currentPassword} onChange={handleChange} />
+      <Input label={t('currentPassword')} name="currentPassword" type="password" value={formData.currentPassword} onChange={handleChange} />
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Input label="New Password" name="newPassword" type="password" value={formData.newPassword} onChange={handleChange} />
-        <Input label="Confirm New Password" name="confirmPassword" type="password" value={formData.confirmPassword} onChange={handleChange} />
+        <Input label={t('newPassword')} name="newPassword" type="password" value={formData.newPassword} onChange={handleChange} />
+        <Input label={t('confirmNewPassword')} name="confirmPassword" type="password" value={formData.confirmPassword} onChange={handleChange} />
       </div>
       <div className="flex justify-end pt-4">
         <Button variant="outline" type="button" onClick={() => { setFormData({ currentPassword: '', newPassword: '', confirmPassword: '' }); setPasswordMessage(''); setPasswordMsgType(''); }}>
-          Cancel
+          {t('cancel')}
         </Button>
-        <Button type="submit">Update Password</Button>
+        <Button type="submit">{t('updatePassword')}</Button>
       </div>
     </form>
   );

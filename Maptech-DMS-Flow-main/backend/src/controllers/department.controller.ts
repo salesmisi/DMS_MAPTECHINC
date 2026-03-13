@@ -71,7 +71,7 @@ export const createDepartment = async (req: AuthRequest, res: Response) => {
           createdById = userResult.rows[0].id;
           createdByRole = userResult.rows[0].role || 'admin';
         }
-      }
+      } 
 
       await pool.query(
         `INSERT INTO folders (id, name, parent_id, department, is_department, created_by, created_by_id, created_by_role, visibility, permissions, created_at)

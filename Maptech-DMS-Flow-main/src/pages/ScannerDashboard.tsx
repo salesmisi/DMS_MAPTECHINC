@@ -9,6 +9,7 @@ import {
   Monitor
 } from 'lucide-react';
 import { useDocuments } from '../context/DocumentContext';
+import { formatDate } from '../utils/locale';
 import { useAuth } from '../context/AuthContext';
 
 interface ScanJob {
@@ -64,7 +65,7 @@ export function ScannerDashboard() {
       id: `scan-${Date.now()}`,
       filename,
       scanner: 'Manual Upload',
-      date: new Date().toLocaleString(),
+      date: formatDate(new Date()),
       pages: 1,
       size: '0 MB',
       status: 'completed'

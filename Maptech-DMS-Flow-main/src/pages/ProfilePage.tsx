@@ -5,8 +5,10 @@ import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Badge } from '../components/ui/Badge';
 import { User, Mail, Building, Shield, Camera, Save, Lock } from 'lucide-react';
+import { useLanguage } from '../context/LanguageContext';
 export function ProfilePage() {
   const { user, updateProfile, changePassword, logout } = useAuth();
+  const { t } = useLanguage();
   const [isLoading, setIsLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
   const [passwordMessage, setPasswordMessage] = useState('');
@@ -136,9 +138,9 @@ export function ProfilePage() {
           <Card className="p-6">
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                <User size={20} className="text-gray-400" />
-                Profile Details
-              </h3>
+                  <User size={20} className="text-gray-400" />
+                  {t('profileDetails')}
+                </h3>
             </div>
 
             <form onSubmit={handleProfileUpdate} className="space-y-4">
@@ -200,7 +202,7 @@ export function ProfilePage() {
                   isLoading={isLoading}
                   leftIcon={<Save size={16} />}>
 
-                  Save Changes
+                  {t('savePreferences')}
                 </Button>
               </div>
             </form>
@@ -208,9 +210,9 @@ export function ProfilePage() {
 
           <Card className="p-6">
             <div className="flex items-center justify-between mb-6">
-              <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
                 <Lock size={20} className="text-gray-400" />
-                Security
+                {t('security')}
               </h3>
             </div>
 
@@ -225,7 +227,7 @@ export function ProfilePage() {
                   </div>
                 )}
               <Input
-                label="Current Password"
+                label={t('currentPassword')}
                 name="currentPassword"
                 type="password"
                 value={formData.currentPassword}
@@ -233,14 +235,14 @@ export function ProfilePage() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Input
-                  label="New Password"
+                  label={t('newPassword')}
                   name="newPassword"
                   type="password"
                   value={formData.newPassword}
                   onChange={handleChange} />
 
                 <Input
-                  label="Confirm New Password"
+                  label={t('confirmNewPassword')}
                   name="confirmPassword"
                   type="password"
                   value={formData.confirmPassword}
@@ -249,7 +251,7 @@ export function ProfilePage() {
               </div>
               <div className="flex justify-end pt-4">
                 <Button variant="outline" type="submit">
-                  Update Password
+                  {t('updatePassword')}
                 </Button>
               </div>
             </form>

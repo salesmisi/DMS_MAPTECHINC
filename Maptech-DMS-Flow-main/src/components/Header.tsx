@@ -1,47 +1,25 @@
 import React, { useState } from 'react';
-import {
-  Menu,
-  Bell,
-  Search,
-  ChevronDown,
-  User,
-  Settings,
-  LogOut,
-  FileText,
-  CheckCheck,
-  Sun,
-  Moon } from
-'lucide-react';
+import { Menu, Bell, Search, ChevronDown, User, Settings, LogOut, FileText, CheckCheck } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigation, PageName } from '../App';
 import { useDocuments } from '../context/DocumentContext';
 import { useNotifications } from '../context/NotificationContext';
 import { hasApprovalAccess } from '../utils/roles';
 import { useTheme } from '../context/ThemeContext';
+import { useLanguage } from '../context/LanguageContext';
+import { formatDateOnly } from '../utils/locale';
 interface HeaderProps {
   onMenuToggle: () => void;
   currentPage: PageName;
 }
-const pageTitles: Record<PageName, string> = {
-  dashboard: 'Dashboard',
-  documents: 'Document Management',
-  scanner: 'Scanner Dashboard',
-  users: 'User Management',
-  folders: 'Folder Management',
-  departments: 'Department Management',
-  archive: 'Archives',
-  trash: 'Trash',
-  'activity-log': 'Activity Log',
-  approvals: 'Pending Approvals',
-  profile: 'My Profile',
-  settings: 'Settings'
-};
+const pageTitles: Record<PageName, string> = {} as any;
 export function Header({ onMenuToggle, currentPage }: HeaderProps) {
   const { user, logout } = useAuth();
   const { navigate } = useNavigation();
   const { documents } = useDocuments();
   const { notifications: dbNotifications, unreadCount, markAsRead, markAllAsRead } = useNotifications();
   const { theme, toggleTheme } = useTheme();
+  const { t } = useLanguage();
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -51,11 +29,11 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
   const pendingCount = unreadCount;
 
   // Use backend notifications for the dropdown; fall back to documents if none in DB yet
-  const notifications = dbNotifications.length > 0
+      const notifications = dbNotifications.length > 0
     ? dbNotifications.filter((n) => !n.isRead).slice(0, 5).map((n) => ({
         id: n.id,
         message: n.title,
-        time: new Date(n.createdAt).toLocaleDateString(),
+        time: formatDateOnly(n.createdAt),
         type: n.type,
         documentId: n.documentId,
       }))
@@ -94,7 +72,7 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
       {/* Page Title */}
       <div className="flex-1">
         <h1 className="text-lg font-semibold text-[#005F02] dark:text-[#7bc67e]">
-          {pageTitles[currentPage] || 'Dashboard'}
+          {t(`pageTitles.${currentPage}`) || 'Dashboard'}
         </h1>
         <p className="text-xs text-gray-500 dark:text-gray-400">
           Maptech Information Solution Inc. — Document Management System
@@ -123,7 +101,6 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
         onClick={toggleTheme}
         className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-gray-600 dark:text-gray-300"
         title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}>
-        {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
       </button>
 
       {/* Notifications */}

@@ -3,6 +3,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { DocumentProvider } from './context/DocumentContext';
 import { NotificationProvider } from './context/NotificationContext';
 import { ThemeProvider } from './context/ThemeContext';
+import { LanguageProvider } from './context/LanguageContext';
 import { LoginPage } from './pages/LoginPage';
 import { AdminDashboard } from './pages/AdminDashboard';
 import { ManagerDashboard } from './pages/ManagerDashboard';
@@ -118,14 +119,16 @@ function AppContent() {
 }
 export function App() {
   return (
-    <ThemeProvider>
-      <AuthProvider>
-        <DocumentProvider>
-          <NotificationProvider>
-            <AppContent />
-          </NotificationProvider>
-        </DocumentProvider>
-      </AuthProvider>
-    </ThemeProvider>);
+    <LanguageProvider>
+      <ThemeProvider>
+        <AuthProvider>
+          <DocumentProvider>
+            <NotificationProvider>
+              <AppContent />
+            </NotificationProvider>
+          </DocumentProvider>
+        </AuthProvider>
+      </ThemeProvider>
+    </LanguageProvider>);
 
 }

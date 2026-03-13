@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { formatDate } from '../utils/locale';
 import { Activity, Download, Search, Filter, Clock } from 'lucide-react';
 import { useDocuments } from '../context/DocumentContext';
 export function ActivityLog() {
@@ -36,16 +37,7 @@ export function ActivityLog() {
     USER_LOGIN: 'bg-gray-100 text-gray-600',
     SCAN_DOCUMENT: 'bg-cyan-100 text-cyan-700'
   };
-  const formatTimestamp = (ts: string) => {
-    const date = new Date(ts);
-    return date.toLocaleString('en-PH', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
+  const formatTimestamp = (ts: string) => formatDate(ts, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   const roleColors: Record<string, string> = {
     admin: 'bg-yellow-100 text-yellow-800',
     manager: 'bg-blue-100 text-blue-800',
