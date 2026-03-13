@@ -123,6 +123,10 @@ export const deleteFolder = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ error: 'This folder is a protected department folder and cannot be deleted' });
     }
 
+    if (req.userRole !== 'admin') {
+      return res.status(403).json({ error: 'Only admins can delete folders directly. Please request deletion for admin approval.' });
+    }
+
     // Delete subfolders first
     await pool.query('DELETE FROM folders WHERE parent_id = $1', [id]);
     // Delete the folder itself
@@ -130,24 +134,21 @@ export const deleteFolder = async (req: AuthRequest, res: Response) => {
     if (result.rows.length === 0) return res.status(404).json({ error: 'Folder not found' });
     const deleted = result.rows[0];
 
-    // If the actor is an admin, write an activity log entry
+    // Write an activity log entry for admin
     try {
-      if (req.userRole === 'admin') {
-        const userId = req.userId || null;
-        // try to get user name
-        let userName = null;
-        if (userId) {
-          const u = await pool.query('SELECT name FROM users WHERE id = $1', [userId]);
-          userName = u.rows[0]?.name || null;
-        }
-        const ip = (req.headers['x-forwarded-for'] as string) || req.ip || null;
-        const details = `Folder "${deleted.name}" was deleted by admin`;
-        await pool.query(
-          `INSERT INTO activity_logs (user_id, user_name, user_role, action, target, target_type, ip_address, details, created_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW())`,
-          [userId, userName, 'admin', 'FOLDER_DELETED', deleted.name, 'folder', ip, details]
-        );
+      const userId = req.userId || null;
+      let userName = null;
+      if (userId) {
+        const u = await pool.query('SELECT name FROM users WHERE id = $1', [userId]);
+        userName = u.rows[0]?.name || null;
       }
+      const ip = (req.headers['x-forwarded-for'] as string) || req.ip || null;
+      const details = `Folder "${deleted.name}" was deleted by admin`;
+      await pool.query(
+        `INSERT INTO activity_logs (user_id, user_name, user_role, action, target, target_type, ip_address, details, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW())`,
+        [userId, userName, 'admin', 'FOLDER_DELETED', deleted.name, 'folder', ip, details]
+      );
     } catch (logErr) {
       console.error('Failed to write activity log for folder delete:', logErr);
     }

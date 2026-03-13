@@ -73,14 +73,19 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
   },
   ...(user?.role === 'admin' ?
   [
-  {
-    id: 'users' as PageName,
-    label: 'User Management',
-    icon: <Users size={18} />,
-    roles: ['admin']
-  }
+    {
+      id: 'users' as PageName,
+      label: 'User Management',
+      icon: <Users size={18} />,
+      roles: ['admin']
+    },
+    {
+      id: 'admin-delete-requests' as PageName,
+      label: 'Delete Requests',
+      icon: <Trash2 size={18} />,
+      roles: ['admin']
+    }
   ] :
-
   []),
   {
     id: 'archive',

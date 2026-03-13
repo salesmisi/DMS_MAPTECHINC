@@ -30,12 +30,14 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
 
   // Use backend notifications for the dropdown; fall back to documents if none in DB yet
       const notifications = dbNotifications.length > 0
-    ? dbNotifications.filter((n) => !n.isRead).slice(0, 5).map((n) => ({
+    ? dbNotifications.filter((n) => !n.isRead).slice(0, 10).map((n) => ({
         id: n.id,
-        message: n.title,
-        time: formatDateOnly(n.createdAt),
+        title: n.title,
+        message: n.message,
+        time: n.createdAt,
         type: n.type,
         documentId: n.documentId,
+        createdAt: n.createdAt,
       }))
     : isApprover
     ? documents
@@ -43,10 +45,12 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
         .slice(0, 5)
         .map((d) => ({
           id: d.id,
+          title: `Approval Needed`,
           message: `"${d.title}" needs approval`,
           time: d.date,
           type: 'approval',
           documentId: d.id,
+          createdAt: d.date,
         }))
     : [];
   const roleColors: Record<string, string> = {
@@ -103,6 +107,7 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
         title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}>
       </button>
 
+
       {/* Notifications */}
       <div className="relative">
         <button
@@ -111,74 +116,81 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
             setShowUserMenu(false);
           }}
           className="relative p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-gray-600 dark:text-gray-300">
-
           <Bell size={20} />
-          {isApprover && pendingCount > 0 && (
+          {unreadCount > 0 && (
             <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">
-              {pendingCount > 9 ? '9+' : pendingCount}
+              {unreadCount > 9 ? '9+' : unreadCount}
             </span>
           )}
         </button>
 
         {showNotifications && (
-          isApprover ? (
-            <div className="absolute right-0 top-full mt-2 w-80 bg-white dark:bg-[#1e1e1e] rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 z-50">
-              <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-700">
-                <h3 className="font-semibold text-gray-800 dark:text-gray-100">Notifications</h3>
-                <p className="text-xs text-gray-500 dark:text-gray-400">{pendingCount} pending approvals</p>
-              </div>
-              <div className="max-h-64 overflow-y-auto">
-                {notifications.length === 0 ? (
-                  <div className="px-4 py-6 text-center text-gray-500 dark:text-gray-400 text-sm">No new notifications</div>
-                ) : (
-                  notifications.map((n) => (
+          <div className="absolute right-0 top-full mt-2 w-80 bg-white dark:bg-[#1e1e1e] rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 z-50">
+            <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-700">
+              <h3 className="font-semibold text-gray-800 dark:text-gray-100">Notifications</h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400">{unreadCount} unread</p>
+            </div>
+            <div className="max-h-64 overflow-y-auto">
+              {notifications.length === 0 ? (
+                <div className="px-4 py-6 text-center text-gray-500 dark:text-gray-400 text-sm">No notifications</div>
+              ) : (
+                notifications.map((n) => {
+                  let icon, iconBg, label, onClick;
+                  if (n.type === 'delete-request') {
+                    icon = <FileText size={14} className="text-red-600" />;
+                    iconBg = 'bg-red-100';
+                    label = 'Delete Request';
+                    onClick = () => { navigate('admin-delete-requests'); setShowNotifications(false); };
+                  } else if (n.type === 'delete-approved') {
+                    icon = <CheckCheck size={14} className="text-green-600" />;
+                    iconBg = 'bg-green-100';
+                    label = 'Delete Approved';
+                    onClick = () => { setShowNotifications(false); };
+                  } else if (n.type === 'delete-denied') {
+                    icon = <FileText size={14} className="text-gray-600" />;
+                    iconBg = 'bg-gray-200';
+                    label = 'Delete Denied';
+                    onClick = () => { setShowNotifications(false); };
+                  } else {
+                    icon = <FileText size={14} className="text-yellow-600" />;
+                    iconBg = 'bg-yellow-100';
+                    label = n.type.charAt(0).toUpperCase() + n.type.slice(1);
+                    onClick = () => { setShowNotifications(false); };
+                  }
+                  return (
                     <button
                       key={n.id}
                       onClick={async () => {
-                        // Mark this notification as read in DB — badge decreases immediately
                         await markAsRead(n.id);
-                        navigate('approvals');
-                        setShowNotifications(false);
+                        onClick();
                       }}
                       className="w-full flex items-start gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-left">
-                      <div className="w-8 h-8 rounded-full bg-yellow-100 flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <FileText size={14} className="text-yellow-600" />
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 ${iconBg}`}>
+                        {icon}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm text-gray-800 dark:text-gray-200 truncate">{n.message}</p>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{n.time}</p>
+                        <p className="text-xs font-semibold text-gray-700 dark:text-gray-200">{label}</p>
+                        <p className="text-sm text-gray-800 dark:text-gray-200 truncate">{n.title}</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{n.message}</p>
+                        <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{new Date(n.createdAt).toLocaleString()}</p>
                       </div>
                     </button>
-                  ))
-                )}
-              </div>
-              {notifications.length > 0 && (
-                <div className="px-4 py-2 border-t border-gray-100 dark:border-gray-700 flex items-center justify-between">
-                  <button
-                    onClick={() => {
-                      navigate('approvals');
-                      setShowNotifications(false);
-                    }}
-                    className="text-sm text-[#005F02] hover:underline font-medium">
-                    View all approvals →
-                  </button>
-                  <button
-                    onClick={async () => {
-                      await markAllAsRead();
-                    }}
-                    className="flex items-center gap-1 text-xs text-gray-500 hover:text-[#005F02] transition-colors"
-                    title="Mark all as read">
-                    <CheckCheck size={14} />
-                    Mark all read
-                  </button>
-                </div>
+                  );
+                })
               )}
             </div>
-          ) : (
-            <div className="absolute right-0 top-full mt-2 w-64 bg-white dark:bg-[#1e1e1e] rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 z-50">
-              <div className="px-4 py-6 text-center text-gray-500 dark:text-gray-400 text-sm">No approvals available</div>
-            </div>
-          )
+            {notifications.length > 0 && (
+              <div className="px-4 py-2 border-t border-gray-100 dark:border-gray-700 flex items-center justify-between">
+                <button
+                  onClick={async () => { await markAllAsRead(); }}
+                  className="flex items-center gap-1 text-xs text-gray-500 hover:text-[#005F02] transition-colors"
+                  title="Mark all as read">
+                  <CheckCheck size={14} />
+                  Mark all read
+                </button>
+              </div>
+            )}
+          </div>
         )}
       </div>
 

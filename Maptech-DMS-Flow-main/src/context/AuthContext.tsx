@@ -154,15 +154,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (!res.ok) {
         const err = await res.json();
-        alert(err.error || 'Failed to create user');
-        return;
+        return { error: err.error || 'Failed to create user' };
       }
 
       const newUser = await res.json();
       setUsers((prev) => [newUser, ...prev]);
+      return { success: true };
     } catch (err) {
       console.error('addUser error:', err);
-      alert('Network error — could not create user');
+      return { error: 'Network error — could not create user' };
     }
   };
 

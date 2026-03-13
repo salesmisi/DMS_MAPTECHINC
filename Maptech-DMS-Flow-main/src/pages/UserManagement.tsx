@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Eye, EyeOff } from 'lucide-react';
 import {
   Users,
   Plus,
@@ -45,6 +46,8 @@ export function UserManagement() {
   const [newDept, setNewDept] = useState({
     name: ''
   });
+  // Fix: Only one showPassword state for the password field
+  const [showPassword, setShowPassword] = useState(false);
 
   // Fetch departments from API on mount
   const fetchDepartments = async () => {
@@ -129,12 +132,18 @@ export function UserManagement() {
     u.email.toLowerCase().includes(search.toLowerCase()) ||
     u.department.toLowerCase().includes(search.toLowerCase())
   );
+  const [addUserError, setAddUserError] = useState('');
   const handleAddUser = async () => {
+    setAddUserError('');
     if (!newUser.name || !newUser.email || !newUser.password || !newUser.department) {
-      alert('Please fill in all required fields including department.');
+      setAddUserError('Please fill in all required fields including department.');
       return;
     }
-    await addUser(newUser);
+    const result = await addUser(newUser);
+    if (result && result.error) {
+      setAddUserError(result.error);
+      return;
+    }
     addLog({
       userId: 'user-1',
       userName: 'Admin User',
@@ -398,7 +407,22 @@ export function UserManagement() {
       {/* Add User Modal */}
       {showAddUser &&
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative">
+          {/* Custom Error Modal */}
+          {addUserError && (
+            <div className="fixed inset-0 flex items-center justify-center z-50">
+              <div className="bg-white border border-red-300 rounded-xl shadow-2xl px-8 py-6 flex flex-col items-center justify-center">
+                <span className="text-red-600 font-semibold text-lg mb-2">Error</span>
+                <span className="text-gray-800 text-center mb-4">{addUserError}</span>
+                <button
+                  className="mt-2 px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+                  onClick={() => setAddUserError('')}
+                >
+                  OK
+                </button>
+              </div>
+            </div>
+          )}
             <div className="p-6 border-b border-gray-100">
               <h3 className="font-semibold text-gray-800 text-lg">
                 Add New User
@@ -427,25 +451,55 @@ export function UserManagement() {
               type: 'password',
               placeholder: 'Min. 6 characters'
             }].
-            map((field) =>
-            <div key={field.key}>
+            map((field) => {
+              if (field.key === 'password') {
+                return (
+                  <div key={field.key} className="relative">
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                      {field.label}
+                    </label>
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      value={(newUser as any)[field.key]}
+                      onChange={(e) =>
+                        setNewUser((prev) => ({
+                          ...prev,
+                          [field.key]: e.target.value
+                        }))
+                      }
+                      placeholder={field.placeholder}
+                      className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#427A43] pr-10" />
+                    <button
+                      type="button"
+                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-700 flex items-center justify-center h-6 w-6 p-0"
+                      tabIndex={-1}
+                      onClick={() => setShowPassword((v) => !v)}
+                      style={{ top: '70%', padding: 0, margin: 0, lineHeight: 0 }}
+                    >
+                      {showPassword ? <EyeOff size={18} /> : <Eye size={15} />}
+                    </button>
+                  </div>
+                );
+              }
+              return (
+                <div key={field.key}>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">
                     {field.label}
                   </label>
                   <input
-                type={field.type}
-                value={(newUser as any)[field.key]}
-                onChange={(e) =>
-                setNewUser((prev) => ({
-                  ...prev,
-                  [field.key]: e.target.value
-                }))
-                }
-                placeholder={field.placeholder}
-                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#427A43]" />
-
+                    type={field.type}
+                    value={(newUser as any)[field.key]}
+                    onChange={(e) =>
+                      setNewUser((prev) => ({
+                        ...prev,
+                        [field.key]: e.target.value
+                      }))
+                    }
+                    placeholder={field.placeholder}
+                    className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#427A43]" />
                 </div>
-            )}
+              );
+            })}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">

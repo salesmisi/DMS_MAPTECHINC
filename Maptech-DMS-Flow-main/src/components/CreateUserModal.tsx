@@ -19,9 +19,13 @@ export function CreateUserModal({ isOpen, onClose }: CreateUserModalProps) {
   });
   const [error, setError] = useState('');
   if (!isOpen) return null;
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    if (!formData.email.endsWith('@maptech.com')) {
+      setError('Email address must end with @maptech.com');
+      return;
+    }
     if (formData.password !== formData.confirmPassword) {
       setError('Passwords do not match');
       return;
@@ -30,31 +34,35 @@ export function CreateUserModal({ isOpen, onClose }: CreateUserModalProps) {
       setError('Password must be at least 6 characters');
       return;
     }
-    const newUser = createUser({
-      name: formData.name,
-      email: formData.email,
-      password: formData.password,
-      role: formData.role,
-      department: formData.department
-    });
-    if (currentUser) {
-      addActivityLog({
-        action: 'CREATE_USER',
-        userId: currentUser.id,
-        userName: currentUser.name,
-        details: `Created new user account: ${formData.email} (${formData.role})`,
-        ipAddress: '192.168.1.100'
+    try {
+      await createUser({
+        name: formData.name,
+        email: formData.email,
+        password: formData.password,
+        role: formData.role,
+        department: formData.department
       });
+      if (currentUser) {
+        addActivityLog({
+          action: 'CREATE_USER',
+          userId: currentUser.id,
+          userName: currentUser.name,
+          details: `Created new user account: ${formData.email} (${formData.role})`,
+          ipAddress: '192.168.1.100'
+        });
+      }
+      setFormData({
+        name: '',
+        email: '',
+        password: '',
+        confirmPassword: '',
+        role: 'staff',
+        department: ''
+      });
+      onClose();
+    } catch (err: any) {
+      setError(err?.message || 'Failed to create user.');
     }
-    onClose();
-    setFormData({
-      name: '',
-      email: '',
-      password: '',
-      confirmPassword: '',
-      role: 'staff',
-      department: ''
-    });
   };
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">

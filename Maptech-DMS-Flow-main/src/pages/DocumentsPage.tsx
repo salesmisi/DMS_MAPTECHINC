@@ -1,4 +1,5 @@
 import React, { useState, Children } from 'react';
+import RequestDeleteModal from '../components/RequestDeleteModal';
 import {
   Search,
   Filter,
@@ -569,25 +570,30 @@ export function DocumentsPage() {
 
                             <Download size={15} />
                           </button>
-                          {(user?.role === 'admin' ||
-                    doc.uploadedById === user?.id) &&
-                    <>
+                          {user?.role === 'admin' && (
+                            <>
                               <button
-                        onClick={() => handleArchive(doc)}
-                        className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors"
-                        title="Archive">
-
+                                onClick={() => handleArchive(doc)}
+                                className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors"
+                                title="Archive">
                                 <Archive size={15} />
                               </button>
                               <button
-                        onClick={() => handleTrash(doc)}
-                        className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-                        title="Move to Trash">
-
+                                onClick={() => handleTrash(doc)}
+                                className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                                title="Move to Trash">
                                 <Trash2 size={15} />
                               </button>
                             </>
-                    }
+                          )}
+                          {user?.role !== 'admin' && (
+                            <button
+                              onClick={() => setActionDoc(doc.id)}
+                              className="p-1.5 text-orange-600 hover:bg-orange-50 rounded transition-colors"
+                              title="Request Delete">
+                              <Trash2 size={15} />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -821,8 +827,8 @@ export function DocumentsPage() {
         </div>
       }
 
-      {/* Move to Trash Confirmation */}
-      {trashTarget && (
+      {/* Move to Trash Confirmation (Admins only) */}
+      {user?.role === 'admin' && trashTarget && (
         <div
           className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
           onClick={() => setTrashTarget(null)}
@@ -862,6 +868,15 @@ export function DocumentsPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Request Delete Modal for staff */}
+      {user?.role !== 'admin' && actionDoc && (
+        <RequestDeleteModal
+          document={filtered.find((d) => d.id === actionDoc)}
+          onClose={() => setActionDoc(null)}
+          onRequested={() => setActionDoc(null)}
+        />
       )}
     </div>);
 

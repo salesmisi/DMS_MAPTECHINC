@@ -108,6 +108,10 @@ export const createUser = async (req: Request, res: Response) => {
     if (!name || !email || !password)
       return res.status(400).json({ error: 'Name, email and password are required' });
 
+    if (!email.endsWith('@maptech.com')) {
+      return res.status(400).json({ error: 'Email address must end with @maptech.com' });
+    }
+
     // check duplicate
     const dup = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
     if (dup.rows.length > 0)

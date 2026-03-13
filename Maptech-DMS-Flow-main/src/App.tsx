@@ -6,6 +6,7 @@ import { ThemeProvider } from './context/ThemeContext';
 import { LanguageProvider } from './context/LanguageContext';
 import { LoginPage } from './pages/LoginPage';
 import { AdminDashboard } from './pages/AdminDashboard';
+import AdminDeleteRequests from './pages/AdminDeleteRequests';
 import { ManagerDashboard } from './pages/ManagerDashboard';
 import { StaffDashboard } from './pages/StaffDashboard';
 import { DocumentsPage } from './pages/DocumentsPage';
@@ -21,18 +22,19 @@ import { SettingsPage } from './pages/SettingsPage';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 export type PageName =
-'dashboard' |
-'documents' |
-'scanner' |
-'users' |
-'folders' |
-'departments' |
-'archive' |
-'trash' |
-'activity-log' |
-'approvals' |
-'profile' |
-'settings';
+  'dashboard' |
+  'documents' |
+  'scanner' |
+  'users' |
+  'folders' |
+  'departments' |
+  'archive' |
+  'trash' |
+  'activity-log' |
+  'approvals' |
+  'admin-delete-requests' |
+  'profile' |
+  'settings';
 interface NavigationContextType {
   currentPage: PageName;
   navigate: (page: PageName) => void;
@@ -80,6 +82,8 @@ function AppContent() {
         return <TrashPage />;
       case 'activity-log':
         return user.role === 'admin' ? <ActivityLog /> : <StaffDashboard />;
+      case 'admin-delete-requests':
+        return user.role === 'admin' ? <AdminDeleteRequests /> : <StaffDashboard />;
       case 'profile':
         return <ProfilePage />;
       case 'settings':

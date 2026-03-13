@@ -82,6 +82,8 @@ import folderRoutes from './routes/folder.routes';
 import departmentRoutes from './routes/department.routes';
 import userRoutes from './routes/user.routes';
 import notificationRoutes from './routes/notification.routes';
+
+import deleteRequestRoutes from './routes/delete-request.routes';
 import activityLogRoutes from './routes/activity-log.routes';
 
 app.use('/api/auth', authRoutes);
@@ -90,6 +92,8 @@ app.use('/api/folders', folderRoutes);
 app.use('/api/departments', departmentRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/notifications', notificationRoutes);
+
+app.use('/api/delete-requests', deleteRequestRoutes);
 app.use('/api/activity-logs', activityLogRoutes);
 
 const PORT = process.env.PORT || 5000;

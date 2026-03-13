@@ -11,6 +11,7 @@ import {
 import { useDocuments } from '../context/DocumentContext';
 import { useAuth } from '../context/AuthContext';
 import { DeleteFolderModal } from './DeleteFolderModal';
+import RequestDeleteModal from './RequestDeleteModal';
 import { Folder } from '../context/DocumentContext';
 
 const INDENT = 10;
@@ -42,6 +43,7 @@ function FolderNode({
 }: FolderNodeProps) {
   const [isExpanded, setIsExpanded] = useState(level < 2 || (forceExpandIds ? forceExpandIds.has(folder.id) : false));
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showRequestDeleteModal, setShowRequestDeleteModal] = useState(false);
   const { deleteFolder } = useDocuments();
   const { user } = useAuth();
   const children = folders.filter((f) => f.parentId === folder.id);
@@ -93,13 +95,24 @@ function FolderNode({
           </span>
         )}
 
-        {canDelete && (
+        {canDelete && user?.role === 'admin' && (
           <button
             onClick={(e) => { e.stopPropagation(); setShowDeleteModal(true); }}
             className={`ft-action ${
               isSelected ? 'text-white/70 hover:text-white hover:bg-white/20' : 'text-gray-400 hover:text-red-600 hover:bg-red-50'
             }`}
             title="Delete folder"
+          >
+            <Trash2 size={12} />
+          </button>
+        )}
+        {canDelete && user?.role !== 'admin' && (
+          <button
+            onClick={(e) => { e.stopPropagation(); setShowRequestDeleteModal(true); }}
+            className={`ft-action ${
+              isSelected ? 'text-white/70 hover:text-white hover:bg-white/20' : 'text-gray-400 hover:text-orange-600 hover:bg-orange-50'
+            }`}
+            title="Request folder delete"
           >
             <Trash2 size={12} />
           </button>
@@ -124,6 +137,13 @@ function FolderNode({
             })();
           }}
           onCancel={() => setShowDeleteModal(false)}
+        />
+      )}
+      {showRequestDeleteModal && (
+        <RequestDeleteModal
+          document={{ id: folder.id, name: folder.name, type: 'folder' }}
+          onClose={() => setShowRequestDeleteModal(false)}
+          onRequested={() => setShowRequestDeleteModal(false)}
         />
       )}
 
@@ -223,21 +243,21 @@ export function FolderTree({
 
     return matched;
   }, [normalizedSearch, visibleFolders, childrenMap]);
-
-  const rootFolders = (normalizedSearch
-    ? (childrenMap['root'] || []).filter((f) => forceShowIds?.has(f.id))
-    : (childrenMap['root'] || []))
-    .sort(sortByName);
-
-  return (
-    <div className="ft-container bg-white rounded-lg shadow-sm border border-gray-200 p-3">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="font-semibold text-maptech-dark text-sm">Folders</h3>
-        {showCreateButton && onCreateFolder && (
-          <button
-            onClick={() => onCreateFolder(null)}
-            className="p-1 text-maptech-primary hover:bg-maptech-cream rounded-lg transition-colors"
-            title="Create new folder"
+          {showDeleteModal && user?.role === 'admin' && (
+            <DeleteFolderModal
+              folderName={folder.name}
+              hasChildren={hasChildren}
+              childCount={children.length}
+              onConfirm={() => {
+                (async () => {
+                  if (isSelected) onSelectFolder && onSelectFolder(null);
+                  await deleteFolder(folder.id);
+                  setShowDeleteModal(false);
+                })();
+              }}
+              onCancel={() => setShowDeleteModal(false)}
+            />
+          )}
           >
             <PlusIcon size={16} />
           </button>

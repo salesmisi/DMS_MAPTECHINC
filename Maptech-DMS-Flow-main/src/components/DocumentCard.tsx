@@ -14,6 +14,8 @@ import {
   DownloadIcon } from
 'lucide-react';
 import { Document } from '../data/mockData';
+import { useAuth } from '../context/AuthContext';
+import RequestDeleteModal from './RequestDeleteModal';
 interface DocumentCardProps {
   document: Document;
   onView?: (doc: Document) => void;
@@ -157,17 +159,36 @@ export function DocumentCard({
                         Archive
                       </button>
                 }
-                    {onDelete &&
-                <button
-                  onClick={() => {
-                    onDelete(document);
-                    setShowMenu(false);
-                  }}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50">
-
+                    {onDelete && user?.role === 'admin' && (
+                      <button
+                        onClick={() => {
+                          onDelete(document);
+                          setShowMenu(false);
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50">
                         <Trash2Icon size={16} />
                         Delete
                       </button>
+                    )}
+                    {onDelete && user?.role !== 'admin' && (
+                      <button
+                        onClick={() => {
+                          setShowRequestDeleteModal(true);
+                          setShowMenu(false);
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-orange-600 hover:bg-orange-50">
+                        <Trash2Icon size={16} />
+                        Request Delete
+                      </button>
+                    )}
+                    {/* Request Delete Modal for staff */}
+                    {showRequestDeleteModal && (
+                      <RequestDeleteModal
+                        document={document}
+                        onClose={() => setShowRequestDeleteModal(false)}
+                        onRequested={() => setShowRequestDeleteModal(false)}
+                      />
+                    )}
                 }
                   </div>
               }

@@ -262,6 +262,10 @@ export const restoreDocument = async (req: AuthRequest, res: Response) => {
 export const permanentlyDeleteDocument = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
+    // Only admin can delete directly; staff must request approval
+    if (req.userRole !== 'admin') {
+      return res.status(403).json({ error: 'Only admins can delete documents directly. Please request deletion for admin approval.' });
+    }
     const result = await pool.query('DELETE FROM documents WHERE id = $1 RETURNING id', [id]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Document not found' });
     return res.json({ message: 'Document permanently deleted' });
