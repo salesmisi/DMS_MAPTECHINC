@@ -29,6 +29,7 @@ interface FolderNodeProps {
   selectedFolderId: string | null;
   onSelectFolder: (folderId: string | null) => void;
   folders: Folder[];
+  forceExpandIds?: Set<string> | null;
 }
 
 function FolderNode({
@@ -37,12 +38,16 @@ function FolderNode({
   selectedFolderId,
   onSelectFolder,
   folders,
+  forceExpandIds = null,
 }: FolderNodeProps) {
-  const [isExpanded, setIsExpanded] = useState(level < 2);
+  const [isExpanded, setIsExpanded] = useState(level < 2 || (forceExpandIds ? forceExpandIds.has(folder.id) : false));
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const { deleteFolder } = useDocuments();
   const { user } = useAuth();
   const children = folders.filter((f) => f.parentId === folder.id);
+  const sortByName = (x: Folder, y: Folder) =>
+    String(x.name || '').localeCompare(String(y.name || ''), undefined, { sensitivity: 'base' });
+  children.sort(sortByName);
   const hasChildren = children.length > 0;
   const isSelected = selectedFolderId === folder.id;
   const isDepartment = (folder as any).is_department || (folder as any).isDepartment || false;
@@ -132,6 +137,7 @@ function FolderNode({
               selectedFolderId={selectedFolderId}
               onSelectFolder={onSelectFolder}
               folders={folders}
+              forceExpandIds={forceExpandIds}
             />
           ))}
         </div>
@@ -164,7 +170,64 @@ export function FolderTree({
     });
   }, [folders, user]);
 
-  const rootFolders = visibleFolders.filter((f) => f.parentId === null);
+  const sortByName = (x: Folder, y: Folder) =>
+    String(x.name || '').localeCompare(String(y.name || ''), undefined, { sensitivity: 'base' });
+
+  // Search state for filtering folders
+  const [searchTerm, setSearchTerm] = React.useState('');
+  const normalizedSearch = String(searchTerm || '').trim().toLowerCase();
+
+  // Build children map for quick traversal
+  const childrenMap = React.useMemo(() => {
+    const m: Record<string, Folder[]> = {};
+    visibleFolders.forEach((f) => {
+      const p = f.parentId || 'root';
+      if (!m[p]) m[p] = [];
+      m[p].push(f);
+    });
+    return m;
+  }, [visibleFolders]);
+
+  // Determine which folder ids should be shown/expanded when searching
+  const forceShowIds = React.useMemo(() => {
+    if (!normalizedSearch) return null;
+    const matched = new Set<string>();
+
+    const addDescendants = (id: string) => {
+      const children = childrenMap[id] || [];
+      children.forEach((c) => {
+        if (!matched.has(c.id)) {
+          matched.add(c.id);
+          addDescendants(c.id);
+        }
+      });
+    };
+
+    // Map by id for ancestor traversal
+    const byId: Record<string, Folder> = {};
+    visibleFolders.forEach((f) => (byId[f.id] = f));
+
+    visibleFolders.forEach((f) => {
+      if (String(f.name || '').toLowerCase().includes(normalizedSearch)) {
+        matched.add(f.id);
+        // include descendants
+        addDescendants(f.id);
+        // include ancestors
+        let p = f.parentId;
+        while (p) {
+          matched.add(p);
+          p = byId[p]?.parentId || null;
+        }
+      }
+    });
+
+    return matched;
+  }, [normalizedSearch, visibleFolders, childrenMap]);
+
+  const rootFolders = (normalizedSearch
+    ? (childrenMap['root'] || []).filter((f) => forceShowIds?.has(f.id))
+    : (childrenMap['root'] || []))
+    .sort(sortByName);
 
   return (
     <div className="ft-container bg-white rounded-lg shadow-sm border border-gray-200 p-3">
@@ -179,6 +242,16 @@ export function FolderTree({
             <PlusIcon size={16} />
           </button>
         )}
+      </div>
+
+      <div className="mb-3">
+        <input
+          type="search"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          placeholder="Search folders..."
+          className="w-full px-2 py-1 border rounded-md text-sm"
+        />
       </div>
 
       {/* All Documents */}
@@ -203,6 +276,7 @@ export function FolderTree({
             selectedFolderId={selectedFolderId}
             onSelectFolder={onSelectFolder}
             folders={visibleFolders}
+            forceExpandIds={forceShowIds}
           />
         ))}
       </div>

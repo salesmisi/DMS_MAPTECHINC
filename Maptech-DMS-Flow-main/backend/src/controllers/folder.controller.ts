@@ -7,7 +7,8 @@ import jwt from 'jsonwebtoken';
 // List all folders
 export const listFolders = async (_req: Request, res: Response) => {
   try {
-    const result = await pool.query('SELECT * FROM folders ORDER BY created_at ASC');
+    // Return folders ordered alphabetically by name (case-insensitive), then by creation time
+    const result = await pool.query("SELECT * FROM folders ORDER BY LOWER(name) ASC, created_at ASC");
     const rows = result.rows;
 
     // If an Authorization token is provided, attempt to verify and return a per-user filtered view

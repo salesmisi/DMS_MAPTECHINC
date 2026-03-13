@@ -12,7 +12,7 @@ import { useAuth } from '../context/AuthContext';
 export function ArchivePage() {
   const { documents, restoreDocument, permanentlyDelete, addLog } =
   useDocuments();
-  const { user } = useAuth();
+  const { user, users } = useAuth();
   const [search, setSearch] = useState('');
   const [filterDept, setFilterDept] = useState('all');
 
@@ -147,17 +147,29 @@ export function ArchivePage() {
           className="text-sm border border-gray-200 bg-white rounded-xl px-3 py-2.5 text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#427A43] shadow-sm">
 
           <option value="all">All Departments</option>
-          {[
-          'Accounting',
-          'Marketing',
-          'Technical Support',
-          'HR',
-          'Administration'].
-          map((d) =>
-          <option key={d} value={d}>
-              {d}
-            </option>
-          )}
+          {React.useMemo(() => {
+            // derive departments from locked root folders and users (intersection)
+            const { folders } = require('../context/DocumentContext');
+            // fallback: use users only if folders not available
+            if (!users || users.length === 0) return null;
+            const userDeptSet = new Set<string>();
+            users.forEach((u: any) => {
+              const d = String(u.department || '').trim();
+              if (d) userDeptSet.add(d);
+            });
+            // try to access folders from context hook instead of require; but we can compute from archived docs as fallback
+            // For safety here, list departments present in users intersected with folders' departments if available via global `window.__folders__` (optional)
+            const folderDeps = new Set<string>();
+            try {
+              const ctx = require('../context/DocumentContext');
+              // ctx doesn't export runtime folders; skip folder-based filter here and just show user departments
+            } catch (e) {
+              // ignore
+            }
+            return Array.from(userDeptSet).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })).map((d) => (
+              <option key={d} value={d}>{d}</option>
+            ));
+          }, [users])}
         </select>
       </div>
 

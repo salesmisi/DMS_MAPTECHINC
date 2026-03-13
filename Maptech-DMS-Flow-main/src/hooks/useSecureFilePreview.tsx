@@ -5,6 +5,7 @@ type Result = {
   loading: boolean;
   error: string | null;
   status?: number;
+  blob?: Blob | null;
 };
 
 /**
@@ -18,6 +19,7 @@ export function useSecureFilePreview(filePath?: string | null): Result {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<number | undefined>(undefined);
+  const [blob, setBlob] = useState<Blob | null>(null);
   const currentUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -69,6 +71,7 @@ export function useSecureFilePreview(filePath?: string | null): Result {
         }
 
         const blob = await resp.blob();
+        setBlob(blob);
         if (aborted) return;
         createdUrl = URL.createObjectURL(blob);
         currentUrlRef.current = createdUrl;
@@ -97,7 +100,7 @@ export function useSecureFilePreview(filePath?: string | null): Result {
     };
   }, [filePath]);
 
-  return { objectUrl, loading, error, status };
+  return { objectUrl, loading, error, status, blob };
 }
 
 export default useSecureFilePreview;

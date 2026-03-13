@@ -44,7 +44,7 @@ function FolderTreeItem({ folder, selectedFolder, selectFolder, getChildren, onC
   const [expanded, setExpanded] = React.useState(level < 2);
   const [deleteModal, setDeleteModal] = React.useState(false);
   const { deleteFolder, folders } = useDocuments();
-  const { user } = useAuth();
+  const { user, users } = useAuth();
   const children = getChildren(folder.id);
   const hasChildren = children.length > 0;
   const isSelected = selectedFolder === folder.id;
@@ -161,7 +161,7 @@ export function DocumentsPage() {
     uploadNewVersion,
     addFolder
   } = useDocuments();
-  const { user } = useAuth();
+  const { user, users } = useAuth();
   const [search, setSearch] = useState('');
   const [filterDept, setFilterDept] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
@@ -192,12 +192,29 @@ export function DocumentsPage() {
   const [showCreateFolder, setShowCreateFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [newFolderParentId, setNewFolderParentId] = useState<string | null>(null);
-  const departments = [
-  'Accounting',
-  'Marketing',
-  'Technical Support',
-  'HR',
-  'Administration'];
+  const departments = React.useMemo(() => {
+    // derive departments from root folders that are marked as department (locked)
+    // and only include those that also have at least one assigned user
+    if (!folders || folders.length === 0) return [];
+    const rootDeptSet = new Set<string>();
+    folders.forEach((f) => {
+      const isDept = (f as any).is_department || (f as any).isDepartment || false;
+      if ((!f.parentId && f.parent_id === undefined) || f.parentId === null || f.parent_id === null) {
+        if (isDept) {
+          const d = String(f.department || f.name || '').trim();
+          if (d) rootDeptSet.add(d);
+        }
+      }
+    });
+    if (!users || users.length === 0) return Array.from(rootDeptSet).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+    const userDeptSet = new Set<string>();
+    users.forEach((u: any) => {
+      const d = String(u.department || '').trim();
+      if (d) userDeptSet.add(d);
+    });
+    const intersection = Array.from(rootDeptSet).filter((d) => userDeptSet.has(d));
+    return intersection.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  }, [folders, users]);
 
   const activeDocuments = documents.filter((d) => d.status !== 'trashed' && d.status !== 'archived');
   // Role-based document visibility:
