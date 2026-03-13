@@ -1,18 +1,27 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
+import { Input } from '../components/ui/Input';
 import { Bell, Moon, Globe, Shield, Smartphone, Monitor } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { useTheme } from '../context/ThemeContext';
 export function SettingsPage() {
+  const { changePassword, logout } = useAuth();
   const [notifications, setNotifications] = useState({
     email: true,
     browser: true,
     approvals: true,
     comments: false
   });
+  const { theme, setTheme } = useTheme();
   const [appearance, setAppearance] = useState({
-    theme: 'light',
+    theme: theme || 'light',
     density: 'comfortable'
   });
+  // keep appearance.theme in sync with ThemeContext
+  useEffect(() => {
+    setAppearance((prev) => ({ ...prev, theme: theme }));
+  }, [theme]);
   const toggleNotification = (key: keyof typeof notifications) => {
     setNotifications((prev) => ({
       ...prev,
@@ -117,12 +126,10 @@ export function SettingsPage() {
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           <button
-            onClick={() =>
-            setAppearance({
-              ...appearance,
-              theme: 'light'
-            })
-            }
+            onClick={() => {
+              setAppearance({ ...appearance, theme: 'light' });
+              setTheme('light');
+            }}
             className={`p-4 border-2 rounded-xl flex flex-col items-center gap-3 transition-all ${appearance.theme === 'light' ? 'border-purple-600 bg-purple-50' : 'border-gray-200 hover:border-gray-300'}`}>
 
             <div className="w-full h-24 bg-white border border-gray-200 rounded-lg shadow-sm"></div>
@@ -130,12 +137,10 @@ export function SettingsPage() {
           </button>
 
           <button
-            onClick={() =>
-            setAppearance({
-              ...appearance,
-              theme: 'dark'
-            })
-            }
+            onClick={() => {
+              setAppearance({ ...appearance, theme: 'dark' });
+              setTheme('dark');
+            }}
             className={`p-4 border-2 rounded-xl flex flex-col items-center gap-3 transition-all ${appearance.theme === 'dark' ? 'border-purple-600 bg-purple-50' : 'border-gray-200 hover:border-gray-300'}`}>
 
             <div className="w-full h-24 bg-gray-900 border border-gray-700 rounded-lg shadow-sm"></div>
@@ -143,12 +148,10 @@ export function SettingsPage() {
           </button>
 
           <button
-            onClick={() =>
-            setAppearance({
-              ...appearance,
-              theme: 'system'
-            })
-            }
+            onClick={() => {
+              setAppearance({ ...appearance, theme: 'system' });
+              setTheme('system');
+            }}
             className={`p-4 border-2 rounded-xl flex flex-col items-center gap-3 transition-all ${appearance.theme === 'system' ? 'border-purple-600 bg-purple-50' : 'border-gray-200 hover:border-gray-300'}`}>
 
             <div className="w-full h-24 bg-gradient-to-r from-white to-gray-900 border border-gray-200 rounded-lg shadow-sm"></div>
@@ -198,6 +201,20 @@ export function SettingsPage() {
       </Card>
 
       {/* Sessions */}
+      <Card className="p-6">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="p-2 bg-gray-50 rounded-lg">
+            <Shield className="text-gray-600" size={24} />
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900">Security</h3>
+            <p className="text-sm text-gray-500">Change your password</p>
+          </div>
+        </div>
+
+        <SecurityForm changePassword={changePassword} logout={logout} />
+      </Card>
+
       <Card className="p-6">
         <div className="flex items-center gap-3 mb-6">
           <div className="p-2 bg-orange-50 rounded-lg">
@@ -250,4 +267,61 @@ export function SettingsPage() {
       </div>
     </div>);
 
+}
+
+function SecurityForm({ changePassword, logout }: { changePassword: (c:string,n:string)=>Promise<boolean>; logout: ()=>void }) {
+  const [formData, setFormData] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
+  const [passwordMessage, setPasswordMessage] = useState('');
+  const [passwordMsgType, setPasswordMsgType] = useState<'error'|'success'|''>('');
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordMessage(''); setPasswordMsgType('');
+    if (!formData.currentPassword || !formData.newPassword || !formData.confirmPassword) {
+      setPasswordMessage('Please fill all password fields'); setPasswordMsgType('error'); return;
+    }
+    if (formData.newPassword.length < 6) { setPasswordMessage('New password must be at least 6 characters'); setPasswordMsgType('error'); return; }
+    if (formData.newPassword !== formData.confirmPassword) { setPasswordMessage('New password and confirm password do not match'); setPasswordMsgType('error'); return; }
+
+    try {
+      const ok = await changePassword(formData.currentPassword, formData.newPassword);
+      if (ok) {
+        setPasswordMessage('Password changed — you will be logged out'); setPasswordMsgType('success');
+        setFormData({ currentPassword: '', newPassword: '', confirmPassword: '' });
+        setTimeout(() => logout(), 1200);
+      } else {
+        setPasswordMessage('Failed to change password — check current password'); setPasswordMsgType('error');
+      }
+    } catch (err) {
+      console.error(err); setPasswordMessage('Network error — could not change password'); setPasswordMsgType('error');
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      {passwordMessage && (
+        <div className="w-full flex justify-center">
+          <div className={`px-4 py-2 rounded text-sm ${passwordMsgType === 'error' ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>
+            {passwordMessage}
+          </div>
+        </div>
+      )}
+
+      <Input label="Current Password" name="currentPassword" type="password" value={formData.currentPassword} onChange={handleChange} />
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Input label="New Password" name="newPassword" type="password" value={formData.newPassword} onChange={handleChange} />
+        <Input label="Confirm New Password" name="confirmPassword" type="password" value={formData.confirmPassword} onChange={handleChange} />
+      </div>
+      <div className="flex justify-end pt-4">
+        <Button variant="outline" type="button" onClick={() => { setFormData({ currentPassword: '', newPassword: '', confirmPassword: '' }); setPasswordMessage(''); setPasswordMsgType(''); }}>
+          Cancel
+        </Button>
+        <Button type="submit">Update Password</Button>
+      </div>
+    </form>
+  );
 }

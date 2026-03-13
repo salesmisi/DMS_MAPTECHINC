@@ -6,9 +6,11 @@ import { Input } from '../components/ui/Input';
 import { Badge } from '../components/ui/Badge';
 import { User, Mail, Building, Shield, Camera, Save, Lock } from 'lucide-react';
 export function ProfilePage() {
-  const { user, updateProfile } = useAuth();
+  const { user, updateProfile, changePassword, logout } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
+  const [passwordMessage, setPasswordMessage] = useState('');
+  const [passwordMsgType, setPasswordMsgType] = useState<'error' | 'success' | ''>('');
   const [formData, setFormData] = useState({
     name: user?.name || '',
     email: user?.email || '',
@@ -40,8 +42,44 @@ export function ProfilePage() {
   };
   const handlePasswordUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Password update logic would go here
-    alert('Password update functionality would be implemented here');
+    setPasswordMessage('');
+    setPasswordMsgType('');
+    if (!formData.currentPassword || !formData.newPassword || !formData.confirmPassword) {
+      setPasswordMessage('Please fill all password fields');
+      setPasswordMsgType('error');
+      return;
+    }
+    if (formData.newPassword.length < 6) {
+      setPasswordMessage('New password must be at least 6 characters');
+      setPasswordMsgType('error');
+      return;
+    }
+    if (formData.newPassword !== formData.confirmPassword) {
+      setPasswordMessage('New password and confirm password do not match');
+      setPasswordMsgType('error');
+      return;
+    }
+
+    try {
+      const ok = await changePassword(formData.currentPassword, formData.newPassword);
+      if (ok) {
+        setPasswordMessage('Password changed — you will be logged out');
+        setPasswordMsgType('success');
+        // clear fields
+        setFormData({ ...formData, currentPassword: '', newPassword: '', confirmPassword: '' });
+        // give user a moment to see the message then logout
+        setTimeout(() => {
+          logout();
+        }, 1200);
+      } else {
+        setPasswordMessage('Failed to change password — check current password');
+        setPasswordMsgType('error');
+      }
+    } catch (err) {
+      console.error('handlePasswordUpdate error:', err);
+      setPasswordMessage('Network error — could not change password');
+      setPasswordMsgType('error');
+    }
   };
   if (!user) return null;
   return (
@@ -177,6 +215,15 @@ export function ProfilePage() {
             </div>
 
             <form onSubmit={handlePasswordUpdate} className="space-y-4">
+                {passwordMessage && (
+                  <div className="w-full flex justify-center">
+                    <div
+                      className={`px-4 py-2 rounded text-sm ${passwordMsgType === 'error' ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}
+                    >
+                      {passwordMessage}
+                    </div>
+                  </div>
+                )}
               <Input
                 label="Current Password"
                 name="currentPassword"

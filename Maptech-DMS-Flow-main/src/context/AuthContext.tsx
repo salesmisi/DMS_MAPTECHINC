@@ -29,6 +29,7 @@ interface AuthContextType {
   updateProfile: (updates: Partial<User>) => void;
   deleteUser: (id: string) => Promise<void>;
   resetPassword: (id: string, newPassword: string) => Promise<void>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<boolean>;
   fetchUsers: () => Promise<void>;
 }
 
@@ -230,6 +231,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // 🔹 CHANGE PASSWORD — PUT /api/users/:id/change-password
+  const changePassword = async (currentPassword: string, newPassword: string) => {
+    try {
+      if (!user) return false;
+      const res = await fetch(`${API_URL}/users/${user.id}/change-password`, {
+        method: 'PUT',
+        headers: authHeaders(token),
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+
+      if (res.ok) {
+        return true;
+      } else {
+        const err = await res.json();
+        console.error('changePassword failed:', err);
+        return false;
+      }
+    } catch (err) {
+      console.error('changePassword error:', err);
+      return false;
+    }
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -244,6 +268,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         updateProfile,
         deleteUser,
         resetPassword,
+        changePassword,
         fetchUsers,
         refreshCurrentUser,
       }}

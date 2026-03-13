@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+import type { AuthRequest } from '../middleware/auth.middleware';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import pool from '../db';
@@ -231,6 +232,38 @@ export const resetPassword = async (req: Request, res: Response) => {
     return res.json({ message: 'Password updated' });
   } catch (err) {
     console.error('resetPassword error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+};
+
+// ── CHANGE PASSWORD (requires current password) ─────────────
+export const changePassword = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword)
+      return res.status(400).json({ error: 'currentPassword and newPassword are required' });
+
+    if (newPassword.length < 6)
+      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+
+    // Only allow users to change their own password (admins can use resetPassword)
+    if (!req.userId || req.userId !== id) return res.status(403).json({ error: 'Forbidden' });
+
+    const result = await pool.query('SELECT password FROM users WHERE id = $1', [id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+
+    const user = result.rows[0];
+    const match = await bcrypt.compare(currentPassword, user.password);
+    if (!match) return res.status(401).json({ error: 'Current password is incorrect' });
+
+    const hashed = await bcrypt.hash(newPassword, 10);
+    await pool.query('UPDATE users SET password = $1 WHERE id = $2', [hashed, id]);
+
+    return res.json({ message: 'Password updated' });
+  } catch (err) {
+    console.error('changePassword error:', err);
     return res.status(500).json({ error: 'Server error' });
   }
 };

@@ -6,6 +6,7 @@ import {
   updateUser,
   deleteUser,
   resetPassword,
+  changePassword,
 } from '../controllers/user.controller';
 import { authenticate } from '../middleware/auth.middleware';
 
@@ -17,5 +18,6 @@ router.post('/', authenticate, createUser);
 router.put('/:id', authenticate, updateUser);
 router.delete('/:id', authenticate, deleteUser);
 router.put('/:id/reset-password', authenticate, resetPassword);
+router.put('/:id/change-password', authenticate, changePassword);
 
 export default router;
