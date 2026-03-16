@@ -120,20 +120,21 @@ export default function AdminDeleteRequests() {
   };
 
   return (
-    <div className="max-w-3xl mx-auto p-6">
+    <div className="max-w-full mx-auto p-6">
       <h2 className="text-2xl font-bold mb-4">Delete Request</h2>
       {/* Status tabs */}
       <div className="flex items-center gap-4 mb-4">
-          <div className="flex w-full rounded-lg overflow-hidden shadow-sm">
+          <div className="flex w-full rounded-lg overflow-visible shadow-sm relative">
+            <span className="absolute -top-4 left-1/2 -translate-x-1/2 z-10">
+              <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-red-600 text-white text-xs border-2 border-white">{counts.pending}</span>
+            </span>
             <button
               onClick={() => setStatusFilter('pending')}
-              className={`relative flex-1 py-4 text-center ${statusFilter==='pending' ? 'bg-green-700 text-white' : 'bg-white text-gray-700'}`}
+              className={`relative flex-1 py-4 text-center ${statusFilter==='pending' ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-white text-gray-700'}`}
             >
               <span className="font-semibold">Pending</span>
               {/* floating count badge centered above */}
-              <span className="absolute -top-3 left-1/2 -translate-x-1/2">
-                <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-red-600 text-white text-xs border-2 border-white">{counts.pending}</span>
-              </span>
+
             </button>
             <button
               onClick={() => setStatusFilter('approved')}
