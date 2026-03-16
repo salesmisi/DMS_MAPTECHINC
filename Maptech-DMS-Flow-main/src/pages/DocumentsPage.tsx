@@ -1,5 +1,6 @@
 import React, { useState, Children } from 'react';
 import RequestDeleteModal from '../components/RequestDeleteModal';
+import { AutocompleteSearch } from '../components/AutocompleteSearch';
 import {
   Search,
   Filter,
@@ -241,6 +242,11 @@ export function DocumentsPage() {
     const matchFolder = !selectedFolder || (doc.folderId && doc.folderId === selectedFolder);
     return matchSearch && matchDept && matchStatus && matchType && matchFolder && hasDocumentAccess(doc);
   });
+
+  const searchSuggestions = React.useMemo(() =>
+    activeDocuments.filter(d => hasDocumentAccess(d)).flatMap((d) => [d.title, d.reference]).filter(Boolean),
+    [activeDocuments, user]
+  );
   const rootFolders = visibleFolders.filter((f) => f.parentId === null);
   const getChildren = (parentId: string) => visibleFolders.filter((f) => f.parentId === parentId);
   const statusBadge = (status: string) => {
@@ -298,16 +304,6 @@ export function DocumentsPage() {
   };
   const handleView = (doc: Document) => {
     setViewingDoc(doc);
-    addLog({
-      userId: user?.id || '',
-      userName: user?.name || '',
-      userRole: user?.role || '',
-      action: 'DOCUMENT_VIEW',
-      target: doc.title,
-      targetType: 'document',
-      timestamp: new Date().toISOString(),
-      ipAddress: '192.168.1.100'
-    });
   };
   const handleDownload = async (doc: Document) => {
     try {
@@ -417,16 +413,13 @@ export function DocumentsPage() {
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
           <div className="flex flex-wrap items-center gap-3">
             {/* Search */}
-            <div className="flex items-center gap-2 bg-gray-100 rounded-lg px-3 py-2 flex-1 min-w-48">
-              <Search size={16} className="text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search by title or reference..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="bg-transparent text-sm outline-none flex-1 text-gray-700" />
-
-            </div>
+            <AutocompleteSearch
+              value={search}
+              onChange={setSearch}
+              suggestions={searchSuggestions}
+              placeholder="Search by title or reference..."
+              className="bg-gray-100 rounded-lg px-3 py-2 flex-1 min-w-48"
+            />
 
             {/* Filters */}
             <select

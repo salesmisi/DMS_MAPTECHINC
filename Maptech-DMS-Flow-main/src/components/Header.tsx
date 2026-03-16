@@ -8,6 +8,7 @@ import { hasApprovalAccess } from '../utils/roles';
 import { useTheme } from '../context/ThemeContext';
 import { useLanguage } from '../context/LanguageContext';
 import { formatDateOnly } from '../utils/locale';
+import { AutocompleteSearch } from './AutocompleteSearch';
 interface HeaderProps {
   onMenuToggle: () => void;
   currentPage: PageName;
@@ -24,6 +25,10 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
   const [showNotifications, setShowNotifications] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const isApprover = hasApprovalAccess(user);
+  const docSuggestions = React.useMemo(() =>
+    documents.filter((d) => d.status !== 'trashed' && d.status !== 'archived').map((d) => d.title).filter(Boolean),
+    [documents]
+  );
 
   // Use backend unread count for the badge
   const pendingCount = unreadCount;
@@ -85,20 +90,18 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
       </div>
 
       {/* Search */}
-      <div className="hidden md:flex items-center gap-2 bg-gray-100 dark:bg-[#2a2a2a] rounded-lg px-3 py-2 w-64">
-        <Search size={16} className="text-gray-400" />
-        <input
-          type="text"
-          placeholder="Search documents..."
+      <div className="hidden md:block w-64">
+        <AutocompleteSearch
           value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && searchQuery.trim()) {
-              navigate('documents');
-            }
+          onChange={(val) => {
+            setSearchQuery(val);
+            if (val.trim()) navigate('documents');
           }}
-          className="bg-transparent text-sm outline-none flex-1 text-gray-700 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500" />
-
+          suggestions={docSuggestions}
+          placeholder="Search documents..."
+          className="bg-gray-100 dark:bg-[#2a2a2a] rounded-lg px-3 py-2"
+          inputClassName="dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500"
+        />
       </div>
 
       {/* Dark Mode Toggle */}

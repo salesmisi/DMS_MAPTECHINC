@@ -114,17 +114,20 @@ export function AdminDashboard() {
         {[
           { label: 'Total Documents', value: stats.total, icon: <FileText size={20} />, color: '#005F02', bg: '#F0FDF4', onClick: () => navigate('documents') },
           { label: 'Pending Approval', value: stats.pending, icon: <Clock size={20} />, color: '#D97706', bg: '#FFFBEB', onClick: () => navigate('documents') },
-          { label: 'Total Folders', value: stats.folders, icon: <FolderOpen size={20} />, color: '#0891B2', bg: '#ECFEFF', onClick: () => navigate('folders') },
+          { label: 'Total Folders', value: stats.folders, icon: <FolderOpen size={20} />, color: '#0891B2', bg: '#ECFEFF', onClick: undefined },
           { label: 'In Trash', value: stats.trashed, icon: <Trash2 size={20} />, color: '#6B7280', bg: '#F9FAFB', onClick: () => navigate('trash') }
-        ].map((stat) => (
-          <button key={stat.label} onClick={stat.onClick} className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 text-left hover:shadow-md transition-shadow">
-            <div className="flex items-center justify-between mb-3">
-              <div className="p-2 rounded-lg" style={{ backgroundColor: stat.bg, color: stat.color }}>{stat.icon}</div>
-              <span className="text-2xl font-bold text-gray-800">{stat.value}</span>
-            </div>
-            <p className="text-xs text-gray-500 font-medium">{stat.label}</p>
-          </button>
-        ))}
+        ].map((stat) => {
+          const Tag = stat.onClick ? 'button' : 'div';
+          return (
+            <Tag key={stat.label} onClick={stat.onClick} className={`bg-white rounded-xl p-4 shadow-sm border border-gray-100 text-left ${stat.onClick ? 'hover:shadow-md cursor-pointer' : ''} transition-shadow`}>
+              <div className="flex items-center justify-between mb-3">
+                <div className="p-2 rounded-lg" style={{ backgroundColor: stat.bg, color: stat.color }}>{stat.icon}</div>
+                <span className="text-2xl font-bold text-gray-800">{stat.value}</span>
+              </div>
+              <p className="text-xs text-gray-500 font-medium">{stat.label}</p>
+            </Tag>
+          );
+        })}
       </div>
 
       {/* Document review section for Admins */}

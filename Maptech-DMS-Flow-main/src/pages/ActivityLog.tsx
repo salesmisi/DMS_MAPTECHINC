@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { formatDate } from '../utils/locale';
 import { Activity, Download, Search, Filter, Clock } from 'lucide-react';
 import { useDocuments } from '../context/DocumentContext';
+import { AutocompleteSearch } from '../components/AutocompleteSearch';
+import * as XLSX from 'xlsx';
 export function ActivityLog() {
   const { activityLogs } = useDocuments();
   const [search, setSearch] = useState('');
@@ -18,11 +20,14 @@ export function ActivityLog() {
     const matchRole = filterRole === 'all' || log.userRole === filterRole;
     return matchSearch && matchAction && matchRole;
   });
+  const logSuggestions = React.useMemo(() =>
+    activityLogs.flatMap((log) => [log.userName, log.target]).filter(Boolean),
+    [activityLogs]
+  );
   const actionColors: Record<string, string> = {
     DOCUMENT_UPLOAD: 'bg-blue-100 text-blue-700',
     DOCUMENT_APPROVED: 'bg-green-100 text-green-700',
     DOCUMENT_REJECTED: 'bg-red-100 text-red-700',
-    DOCUMENT_VIEW: 'bg-gray-100 text-gray-600',
     DOCUMENT_DOWNLOAD: 'bg-purple-100 text-purple-700',
     DOCUMENT_ARCHIVED: 'bg-orange-100 text-orange-700',
     DOCUMENT_TRASHED: 'bg-red-100 text-red-600',
@@ -35,6 +40,8 @@ export function ActivityLog() {
     CREATE_DEPARTMENT: 'bg-blue-100 text-blue-700',
     DEPARTMENT_DELETED: 'bg-red-100 text-red-700',
     USER_LOGIN: 'bg-gray-100 text-gray-600',
+    USER_LOGOUT: 'bg-orange-100 text-orange-700',
+    USER_UPDATED: 'bg-indigo-100 text-indigo-700',
     SCAN_DOCUMENT: 'bg-cyan-100 text-cyan-700'
   };
   const formatTimestamp = (ts: string) => formatDate(ts, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -61,10 +68,6 @@ export function ActivityLog() {
     label: 'Rejections'
   },
   {
-    value: 'VIEW',
-    label: 'Views'
-  },
-  {
     value: 'DOWNLOAD',
     label: 'Downloads'
   },
@@ -79,6 +82,14 @@ export function ActivityLog() {
   {
     value: 'LOGIN',
     label: 'Logins'
+  },
+  {
+    value: 'LOGOUT',
+    label: 'Logouts'
+  },
+  {
+    value: 'USER_UPDATED',
+    label: 'User Updates'
   }];
 
   return (
@@ -95,47 +106,85 @@ export function ActivityLog() {
         </div>
         <button
           onClick={() => {
-            const headers = ['Timestamp', 'User', 'Role', 'Action', 'Target', 'Target Type', 'IP Address', 'Details'];
-            const rows = filtered.map((log) => [
-              log.timestamp,
-              log.userName,
-              log.userRole,
-              log.action,
-              log.target,
-              log.targetType,
-              log.ipAddress || '',
-              log.details || ''
-            ].map((v) => '"' + String(v).replace(/"/g, '""') + '"').join(','));
-            const csv = [headers.join(','), ...rows].join('\n');
-            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'activity-log-' + new Date().toISOString().split('T')[0] + '.csv';
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            URL.revokeObjectURL(url);
+            const wb = XLSX.utils.book_new();
+            const wsData: (string | null)[][] = [];
+
+            // Row 1: Title (merged across columns)
+            const titleRow: (string | null)[] = ['MAPTECH DOCUMENT MANAGEMENT SYSTEM - ACTIVITY LOGS'];
+            for (let i = 1; i < 26; i++) titleRow.push(null);
+            wsData.push(titleRow);
+
+            // Rows 2-3: Empty
+            wsData.push([]);
+            wsData.push([]);
+
+            // Row 4: Headers with spacing (columns B, F, J, N, R, V)
+            const headerRow: (string | null)[] = [null, 'TIMESTAMP', null, null, null, 'USER', null, null, null, 'ACTION', null, null, null, 'TARGET', null, null, null, 'IP ADDRESS', null, null, null, 'DETAILS', null, null, null];
+            wsData.push(headerRow);
+
+            // Data rows starting at row 5
+            filtered.forEach((log) => {
+              const row: (string | null)[] = [
+                null,
+                formatTimestamp(log.timestamp),
+                null, null, null,
+                log.userName,
+                null, null, null,
+                log.action.replace(/_/g, ' '),
+                null, null, null,
+                log.target,
+                null, null, null,
+                log.ipAddress || '',
+                null, null, null,
+                log.details || '',
+                null, null, null,
+              ];
+              wsData.push(row);
+            });
+
+            const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+            // Merge title row across all columns
+            ws['!merges'] = [
+              { s: { r: 0, c: 0 }, e: { r: 0, c: 24 } },
+            ];
+
+            // Set column widths
+            ws['!cols'] = [
+              { wch: 2 },   // A spacer
+              { wch: 22 },  // B TIMESTAMP
+              { wch: 2 }, { wch: 2 }, { wch: 2 },  // spacers
+              { wch: 20 },  // F USER
+              { wch: 2 }, { wch: 2 }, { wch: 2 },  // spacers
+              { wch: 28 },  // J ACTION
+              { wch: 2 }, { wch: 2 }, { wch: 2 },  // spacers
+              { wch: 28 },  // N TARGET
+              { wch: 2 }, { wch: 2 }, { wch: 2 },  // spacers
+              { wch: 16 },  // R IP ADDRESS
+              { wch: 2 }, { wch: 2 }, { wch: 2 },  // spacers
+              { wch: 40 },  // V DETAILS
+              { wch: 2 }, { wch: 2 }, { wch: 2 },  // spacers
+            ];
+
+            XLSX.utils.book_append_sheet(wb, ws, 'Activity Logs');
+            XLSX.writeFile(wb, 'DMS_Activity_Logs_' + new Date().toISOString().split('T')[0] + '.xlsx');
           }}
           className="flex items-center gap-2 px-4 py-2 bg-[#C0B87A] text-[#005F02] text-sm font-semibold rounded-xl hover:bg-[#F2E3BB] transition-colors">
 
           <Download size={16} />
-          Export CSV
+          Export Excel
         </button>
       </div>
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-2 bg-white rounded-xl px-4 py-2.5 shadow-sm border border-gray-100 flex-1 min-w-48">
-          <Search size={16} className="text-gray-400" />
-          <input
-            type="text"
-            placeholder="Search by user, action, or target..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="bg-transparent text-sm outline-none flex-1 text-gray-700" />
-
-        </div>
+        <AutocompleteSearch
+          value={search}
+          onChange={setSearch}
+          suggestions={logSuggestions}
+          placeholder="Search by user, action, or target..."
+          className="bg-white rounded-xl px-4 py-2.5 shadow-sm border border-gray-100 flex-1 min-w-48"
+        />
         <select
           value={filterAction}
           onChange={(e) => setFilterAction(e.target.value)}

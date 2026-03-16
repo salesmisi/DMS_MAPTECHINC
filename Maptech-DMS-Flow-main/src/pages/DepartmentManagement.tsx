@@ -8,6 +8,7 @@ import {
   UsersIcon,
   XIcon } from
 'lucide-react';
+import { AutocompleteSearch } from '../components/AutocompleteSearch';
 import { useAuth } from '../context/AuthContext';
 import { useDocuments } from '../context/DocumentContext';
 export function DepartmentManagement() {
@@ -19,6 +20,10 @@ export function DepartmentManagement() {
   const [newDeptName, setNewDeptName] = useState('');
   const filteredDepartments = departments.filter((dept) =>
   dept.name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+  const deptSuggestions = React.useMemo(() =>
+    departments.map((d) => d.name).filter(Boolean),
+    [departments]
   );
   const getUserCount = (deptName: string) =>
   users.filter((u) => u.department === deptName).length;
@@ -85,17 +90,13 @@ export function DepartmentManagement() {
       {/* Search */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
         <div className="relative max-w-md">
-          <SearchIcon
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-            size={18} />
-
-          <input
-            type="text"
-            placeholder="Search departments..."
+          <AutocompleteSearch
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-maptech-primary/50 focus:border-maptech-primary text-sm" />
-
+            onChange={setSearchQuery}
+            suggestions={deptSuggestions}
+            placeholder="Search departments..."
+            className=""
+          />
         </div>
       </div>
 

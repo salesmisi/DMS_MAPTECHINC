@@ -125,6 +125,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(data.user));
       // Notify DocumentContext to re-fetch data from backend
       window.dispatchEvent(new Event('dms-auth-change'));
+
+      // Log login activity
+      try {
+        await fetch(`${API_URL}/activity-logs`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${data.token}`,
+          },
+          body: JSON.stringify({
+            action: 'USER_LOGIN',
+            target: data.user.name,
+            targetType: 'system',
+            userName: data.user.name,
+            userRole: data.user.role,
+            details: `${data.user.name} logged in`,
+          }),
+        });
+      } catch (logErr) {
+        console.error('Failed to log login activity:', logErr);
+      }
+
       return true;
     } catch (err) {
       console.error('Login error:', err);
@@ -133,7 +155,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   // 🔹 LOGOUT
-  const logout = () => {
+  const logout = async () => {
+    // Log logout activity before clearing session
+    try {
+      const authToken = token || localStorage.getItem(TOKEN_KEY);
+      if (user && authToken) {
+        await fetch(`${API_URL}/activity-logs`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${authToken}`,
+          },
+          body: JSON.stringify({
+            action: 'USER_LOGOUT',
+            target: user.name,
+            targetType: 'system',
+            userName: user.name,
+            userRole: user.role,
+            details: `${user.name} logged out`,
+          }),
+        });
+      }
+    } catch (logErr) {
+      console.error('Failed to log logout activity:', logErr);
+    }
+
     setUser(null);
     setToken(null);
     setUsers([]);

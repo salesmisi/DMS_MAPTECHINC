@@ -13,6 +13,7 @@ import { useAuth } from '../context/AuthContext';
 import { DeleteFolderModal } from './DeleteFolderModal';
 import RequestDeleteModal from './RequestDeleteModal';
 import { Folder } from '../context/DocumentContext';
+import { AutocompleteSearch } from './AutocompleteSearch';
 
 const INDENT = 10;
 const MAX_LVL = 6;
@@ -197,6 +198,11 @@ export function FolderTree({
   const [searchTerm, setSearchTerm] = React.useState('');
   const normalizedSearch = String(searchTerm || '').trim().toLowerCase();
 
+  const folderSuggestions = React.useMemo(() =>
+    visibleFolders.map((f) => f.name).filter(Boolean),
+    [visibleFolders]
+  );
+
   // Build children map for quick traversal
   const childrenMap = React.useMemo(() => {
     const m: Record<string, Folder[]> = {};
@@ -265,12 +271,12 @@ export function FolderTree({
       </div>
 
       <div className="mb-3">
-        <input
-          type="search"
+        <AutocompleteSearch
           value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
+          onChange={setSearchTerm}
+          suggestions={folderSuggestions}
           placeholder="Search folders..."
-          className="w-full px-2 py-1 border rounded-md text-sm"
+          className="w-full px-2 py-1 border rounded-md"
         />
       </div>
 

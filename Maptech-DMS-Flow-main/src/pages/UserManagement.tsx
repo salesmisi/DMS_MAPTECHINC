@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import {
   Users,
@@ -15,6 +15,7 @@ import {
 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useDocuments } from '../context/DocumentContext';
+import { AutocompleteSearch } from '../components/AutocompleteSearch';
 
 interface Department {
   id: string;
@@ -25,7 +26,7 @@ interface Department {
 }
 
 export function UserManagement() {
-  const { users, addUser, updateUser, deleteUser } = useAuth();
+  const { user: currentUser, users, addUser, updateUser, deleteUser } = useAuth();
   const { addLog } = useDocuments();
   const [search, setSearch] = useState('');
   const [showAddUser, setShowAddUser] = useState(false);
@@ -96,6 +97,17 @@ export function UserManagement() {
         setShowAddDept(false);
         // Refresh folders so the newly-created department folder is available
         window.dispatchEvent(new Event('dms-folders-refresh'));
+        addLog({
+          userId: currentUser?.id || '',
+          userName: currentUser?.name || '',
+          userRole: currentUser?.role || 'admin',
+          action: 'CREATE_DEPARTMENT',
+          target: newDept.name,
+          targetType: 'system',
+          timestamp: new Date().toISOString(),
+          ipAddress: '192.168.1.100',
+          details: `Department "${newDept.name}" created`
+        });
       } else {
         const errData = await res.json();
         alert(errData.error || 'Failed to create department');
@@ -121,6 +133,17 @@ export function UserManagement() {
       if (res.ok) {
         setDepartments((prev) => prev.filter((d) => d.id !== deleteDeptConfirm.id));
         window.dispatchEvent(new Event('dms-folders-refresh'));
+        addLog({
+          userId: currentUser?.id || '',
+          userName: currentUser?.name || '',
+          userRole: currentUser?.role || 'admin',
+          action: 'DEPARTMENT_DELETED',
+          target: deleteDeptConfirm.name,
+          targetType: 'system',
+          timestamp: new Date().toISOString(),
+          ipAddress: '192.168.1.100',
+          details: `Department "${deleteDeptConfirm.name}" deleted`
+        });
       } else {
         const errData = await res.json();
         alert(errData.error || 'Failed to delete department');
@@ -138,6 +161,10 @@ export function UserManagement() {
     u.email.toLowerCase().includes(search.toLowerCase()) ||
     u.department.toLowerCase().includes(search.toLowerCase())
   );
+  const userSuggestions = useMemo(() =>
+    users.flatMap((u) => [u.name, u.email, u.department]).filter(Boolean),
+    [users]
+  );
   const [addUserError, setAddUserError] = useState('');
   const handleAddUser = async () => {
     setAddUserError('');
@@ -151,9 +178,9 @@ export function UserManagement() {
       return;
     }
     addLog({
-      userId: 'user-1',
-      userName: 'Admin User',
-      userRole: 'admin',
+      userId: currentUser?.id || '',
+      userName: currentUser?.name || '',
+      userRole: currentUser?.role || 'admin',
       action: 'USER_CREATED',
       target: newUser.name,
       targetType: 'user',
@@ -173,8 +200,20 @@ export function UserManagement() {
   };
   const handleToggleStatus = async (id: string, currentStatus: string) => {
     const newStatus = currentStatus === 'active' ? 'inactive' : 'active';
+    const targetUser = users.find((u) => u.id === id);
     await updateUser(id, {
       status: newStatus as 'active' | 'inactive'
+    });
+    addLog({
+      userId: currentUser?.id || '',
+      userName: currentUser?.name || '',
+      userRole: currentUser?.role || 'admin',
+      action: 'USER_UPDATED',
+      target: targetUser?.name || id,
+      targetType: 'user',
+      timestamp: new Date().toISOString(),
+      ipAddress: '192.168.1.100',
+      details: `Status changed from ${currentStatus} to ${newStatus}`
     });
   };
   const handleDeleteUser = async (id: string, name: string) => {
@@ -184,9 +223,9 @@ export function UserManagement() {
     if (!deleteConfirm) return;
     await deleteUser(deleteConfirm.id);
     addLog({
-      userId: 'user-1',
-      userName: 'Admin User',
-      userRole: 'admin',
+      userId: currentUser?.id || '',
+      userName: currentUser?.name || '',
+      userRole: currentUser?.role || 'admin',
       action: 'USER_DELETED',
       target: deleteConfirm.name,
       targetType: 'user',
@@ -244,16 +283,13 @@ export function UserManagement() {
       {activeTab === 'users' &&
       <>
           {/* Search */}
-          <div className="flex items-center gap-2 bg-white rounded-xl px-4 py-3 shadow-sm border border-gray-100 max-w-md">
-            <Search size={16} className="text-gray-400" />
-            <input
-            type="text"
-            placeholder="Search users..."
+          <AutocompleteSearch
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="bg-transparent text-sm outline-none flex-1 text-gray-700" />
-
-          </div>
+            onChange={setSearch}
+            suggestions={userSuggestions}
+            placeholder="Search users..."
+            className="bg-white rounded-xl px-4 py-3 shadow-sm border border-gray-100 max-w-md"
+          />
 
           {/* Users Table */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
