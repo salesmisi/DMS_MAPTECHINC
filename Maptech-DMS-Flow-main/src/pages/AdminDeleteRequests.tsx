@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigation } from '../App';
+import { Trash2, CheckCircle, XCircle, Eye, Clock, FileText, Folder, AlertTriangle } from 'lucide-react';
 
 const API_URL = 'http://localhost:5000/api';
 
@@ -14,7 +15,6 @@ interface DeleteRequest {
   reason: string | null;
   created_at: string;
   requested_by_name?: string;
-  // optional resolved target object when enriched client-side
   resolvedTarget?: any;
 }
 
@@ -36,8 +36,6 @@ export default function AdminDeleteRequests() {
       });
       if (!res.ok) throw new Error('Failed to fetch requests');
       const data = await res.json();
-      // If the request rows don't include a department, try to resolve it
-      // by fetching documents and folders (bulk) and mapping by id.
       try {
         const [docsRes, foldersRes] = await Promise.all([
           fetch(`${API_URL}/documents`, { headers: { Authorization: `Bearer ${token}` } }),
@@ -63,18 +61,14 @@ export default function AdminDeleteRequests() {
               const f = folderById.get(String(r.target_id));
               if (f) return { ...r, department: r.department || f.department || null, resolvedTarget: f };
             }
-          } catch (e) {
-            // ignore and fall through
-          }
+          } catch (e) {}
           return { ...r, department: r.department || null };
         });
 
         setRequests(enriched);
       } catch (e) {
-        // If enrichment fails, just set raw data
         setRequests(data);
       }
-      // also refresh counts when we fetch
       try { await loadCounts(); } catch (_) {}
     } catch (err: any) {
       setError(err.message || 'Error fetching requests');
@@ -92,13 +86,10 @@ export default function AdminDeleteRequests() {
       const approved = data.filter((r: any) => r.status === 'approved').length;
       const denied = data.filter((r: any) => r.status === 'denied').length;
       setCounts({ pending, approved, denied, all: data.length });
-    } catch (e) {
-      // ignore
-    }
+    } catch (e) {}
   };
 
   useEffect(() => { fetchRequests(statusFilter); }, [token, statusFilter]);
-
 
   const { navigate, selectFolder } = useNavigation();
 
@@ -111,7 +102,7 @@ export default function AdminDeleteRequests() {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error(`Failed to ${action}`);
-      await fetchRequests();
+      await fetchRequests(statusFilter);
     } catch (err: any) {
       setError(err.message || `Error on ${action}`);
     } finally {
@@ -119,71 +110,173 @@ export default function AdminDeleteRequests() {
     }
   };
 
-  return (
-    <div className="max-w-full mx-auto p-6">
-      <h2 className="text-2xl font-bold mb-4">Delete Request</h2>
-      {/* Status tabs */}
-      <div className="flex items-center gap-4 mb-4">
-          <div className="flex w-full rounded-lg overflow-visible shadow-sm relative">
-            <span className="absolute -top-2 left-11 -translate-x-12 z-10">
-              <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-red-600 text-white text-xs border-2 border-white">{counts.pending}</span>
-            </span>
-            <button
-              onClick={() => setStatusFilter('pending')}
-              className={`relative flex-1 py-4 text-center ${statusFilter==='pending' ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-white text-gray-700'}`}
-            >
-              <span className="font-semibold">Pending</span>
-              {/* floating count badge centered above */}
+  const statusBadge = (status: string) => {
+    const styles: Record<string, string> = {
+      pending: 'bg-yellow-100 text-yellow-700',
+      approved: 'bg-green-100 text-green-700',
+      denied: 'bg-red-100 text-red-700',
+    };
+    return (
+      <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${styles[status] || 'bg-gray-100 text-gray-600'}`}>
+        {status === 'denied' ? 'rejected' : status}
+      </span>
+    );
+  };
 
-            </button>
-            <button
-              onClick={() => setStatusFilter('approved')}
-              className={`flex-1 py-4 text-center ${statusFilter==='approved' ? 'bg-white text-gray-700' : 'bg-white text-gray-700'}`}
-            >
-              <span className="font-semibold">Approved</span>
-            </button>
-            <button
-              onClick={() => setStatusFilter('denied')}
-              className={`flex-1 py-4 text-center ${statusFilter==='denied' ? 'bg-white text-gray-700' : 'bg-white text-gray-700'}`}
-            >
-              <span className="font-semibold">Rejected</span>
-            </button>
-            <button
-              onClick={() => setStatusFilter('all')}
-              className={`flex-1 py-4 text-center ${statusFilter==='all' ? 'bg-white text-gray-700' : 'bg-white text-gray-700'}`}
-            >
-              <span className="font-semibold">All</span>
-            </button>
-          </div>
+  const fileTypeBadge = (type: string, target?: any) => {
+    const ext = (target?.file_type || target?.fileType || type || '').toUpperCase();
+    const colors: Record<string, string> = {
+      PDF: 'bg-red-500',
+      PNG: 'bg-red-400',
+      JPG: 'bg-blue-500',
+      JPEG: 'bg-blue-500',
+      MP4: 'bg-blue-600',
+      DOC: 'bg-blue-700',
+      DOCX: 'bg-blue-700',
+      PPT: 'bg-orange-500',
+      PPTX: 'bg-orange-500',
+      FOLDER: 'bg-[#427A43]',
+    };
+    const label = type === 'folder' ? 'FOLDER' : ext;
+    const bg = colors[label] || 'bg-gray-500';
+    return (
+      <span className={`${bg} text-white text-[10px] font-bold px-2 py-1 rounded-md`}>
+        {label || type.toUpperCase()}
+      </span>
+    );
+  };
+
+  const tabs = [
+    { key: 'pending' as const, label: 'Pending', count: counts.pending },
+    { key: 'approved' as const, label: 'Approved', count: counts.approved },
+    { key: 'denied' as const, label: 'Rejected', count: counts.denied },
+    { key: 'all' as const, label: 'All', count: counts.all },
+  ];
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="bg-[#005F02] rounded-2xl p-6 text-white flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold mb-1 flex items-center gap-3">
+            <Trash2 size={24} />
+            Delete Requests
+          </h2>
+          <p className="text-green-100 text-sm">Review and manage deletion requests from staff</p>
+        </div>
+        <div className="text-right">
+          <div className="text-3xl font-bold">{counts.pending}</div>
+          <div className="text-green-200 text-xs">Pending review</div>
+        </div>
       </div>
-      {loading && <div className="mb-4">Loading...</div>}
-      {error && <div className="mb-4 text-red-600">{error}</div>}
-      {requests.length === 0 && !loading ? (
-        <div className="text-gray-500">No {statusFilter === 'pending' ? 'pending' : statusFilter === 'approved' ? 'approved' : statusFilter === 'denied' ? 'rejected' : 'delete'} requests.</div>
-      ) : (
-        <table className="w-full border rounded-lg overflow-hidden">
-          <thead className="bg-gray-100">
-            <tr>
-              <th className="p-2 text-left">Type</th>
-              <th className="p-2 text-left">Target</th>
-              <th className="p-2 text-left">Requested By</th>
-              <th className="p-2 text-left">Department</th>
-              <th className="p-2 text-left">Reason</th>
-              <th className="p-2 text-left">Requested At</th>
-              <th className="p-2 text-left">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {requests.map((req) => (
-                      <tr key={req.id} className="border-b">
-                      <td className="p-2 capitalize">{req.type}</td>
-                      <td className="p-2">
-                        {(() => {
-                          const title = req.resolvedTarget?.title || req.resolvedTarget?.name || req.target_title || req.target_name || req.target_id;
-                          const reference = req.resolvedTarget?.reference || req.resolvedTarget?.reference || req.reference || null;
-                          return (
+
+      {/* Tabs */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+        <div className="flex border-b border-gray-100">
+          {tabs.map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => setStatusFilter(tab.key)}
+              className={`flex-1 py-3.5 text-sm font-semibold text-center transition-colors relative ${
+                statusFilter === tab.key
+                  ? 'text-[#005F02] bg-[#f0fdf4]'
+                  : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              {tab.label}
+              {tab.count > 0 && (
+                <span className={`ml-2 inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full text-xs font-bold ${
+                  statusFilter === tab.key ? 'bg-[#005F02] text-white' : 'bg-gray-200 text-gray-600'
+                }`}>
+                  {tab.count}
+                </span>
+              )}
+              {statusFilter === tab.key && (
+                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#005F02]" />
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* Content */}
+        <div className="p-4">
+          {error && (
+            <div className="mb-4 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 flex items-center gap-2">
+              <AlertTriangle size={16} />
+              {error}
+            </div>
+          )}
+
+          {loading && requests.length === 0 ? (
+            <div className="flex items-center justify-center py-16">
+              <div className="flex flex-col items-center gap-3">
+                <div className="w-8 h-8 border-3 border-[#427A43] border-t-transparent rounded-full animate-spin" />
+                <p className="text-sm text-gray-500">Loading requests...</p>
+              </div>
+            </div>
+          ) : requests.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-gray-400">
+              <Trash2 size={48} className="mb-3 text-gray-300" />
+              <p className="text-sm font-medium">No {statusFilter === 'all' ? '' : statusFilter === 'denied' ? 'rejected' : statusFilter} requests</p>
+              <p className="text-xs text-gray-400 mt-1">Requests will appear here when staff submit them</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {requests.map((req) => {
+                const title = req.resolvedTarget?.title || req.resolvedTarget?.name || req.target_id;
+                const reference = req.resolvedTarget?.reference || null;
+                const uploadedBy = req.resolvedTarget?.uploaded_by || req.resolvedTarget?.uploadedBy || req.resolvedTarget?.created_by || null;
+                const date = req.resolvedTarget?.date || req.resolvedTarget?.created_at || null;
+
+                return (
+                  <div key={req.id} className="bg-white rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow p-4">
+                    <div className="flex items-start gap-4">
+                      {/* File Type Badge */}
+                      <div className="flex-shrink-0 mt-1">
+                        {fileTypeBadge(req.type, req.resolvedTarget)}
+                      </div>
+
+                      {/* Content */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <h4 className="font-semibold text-gray-800 text-sm">{title}</h4>
+                            <p className="text-xs text-gray-500 mt-0.5">
+                              {reference && <span>{reference} · </span>}
+                              {req.department && <span>{req.department} · </span>}
+                              {uploadedBy && <span>Requested by {req.requested_by_name || uploadedBy} · </span>}
+                              {!uploadedBy && req.requested_by_name && <span>Requested by {req.requested_by_name} · </span>}
+                              {date ? new Date(date).toLocaleDateString('en-CA') : new Date(req.created_at).toLocaleDateString('en-CA')}
+                            </p>
+                            {req.reason && (
+                              <p className="text-xs text-gray-400 mt-1 italic">Reason: {req.reason}</p>
+                            )}
+                          </div>
+                          <div className="flex-shrink-0">
+                            {statusBadge(req.status)}
+                          </div>
+                        </div>
+
+                        {/* Actions */}
+                        {req.status === 'pending' && (
+                          <div className="flex items-center gap-2 mt-3">
                             <button
-                              className="text-left"
+                              onClick={() => handleAction(req.id, 'approve')}
+                              disabled={loading}
+                              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-[#005F02] text-white text-xs font-semibold rounded-lg hover:bg-[#427A43] transition-colors disabled:opacity-50"
+                            >
+                              <CheckCircle size={13} />
+                              Approve
+                            </button>
+                            <button
+                              onClick={() => handleAction(req.id, 'deny')}
+                              disabled={loading}
+                              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-red-600 text-white text-xs font-semibold rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50"
+                            >
+                              <XCircle size={13} />
+                              Reject
+                            </button>
+                            <button
                               onClick={() => {
                                 try {
                                   if (req.type === 'document') {
@@ -193,71 +286,28 @@ export default function AdminDeleteRequests() {
                                   } else {
                                     const fid = req.resolvedTarget?.id || req.target_id;
                                     if (fid && selectFolder) selectFolder(fid);
-                                    navigate('folders');
+                                    navigate('documents');
                                   }
                                 } catch (e) {
-                                  if (req.type === 'document') navigate('documents'); else navigate('folders');
+                                  navigate('documents');
                                 }
                               }}
+                              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-gray-200 text-gray-600 text-xs font-semibold rounded-lg hover:bg-gray-50 transition-colors"
                             >
-                              <div className="font-medium text-gray-800">{title}</div>
-                              {reference && <div className="text-xs text-gray-500">{reference}</div>}
+                              <Eye size={13} />
+                              View Details
                             </button>
-                          );
-                        })()}
-                      </td>
-                      <td className="p-2">{req.requested_by_name || req.requested_by}</td>
-                      <td className="p-2">
-                        {req.department ? (
-                          <button
-                            className="text-blue-600 underline"
-                            title={req.type === 'document' ? 'Open in Documents' : 'Open folder'}
-                            onClick={() => {
-                              try {
-                                if (req.type === 'document') {
-                                  // try to navigate to Documents and select the containing folder if known
-                                  const folderId = req.resolvedTarget?.folder_id || req.resolvedTarget?.folderId || null;
-                                  if (folderId && selectFolder) selectFolder(folderId);
-                                  navigate('documents');
-                                } else {
-                                  // folder
-                                  const fid = req.resolvedTarget?.id || req.target_id;
-                                  if (fid && selectFolder) selectFolder(fid);
-                                  navigate('folders');
-                                }
-                              } catch (e) {
-                                // fallback: just navigate
-                                if (req.type === 'document') navigate('documents'); else navigate('folders');
-                              }
-                            }}
-                          >
-                            {req.department}
-                          </button>
-                        ) : '-'}
-                      </td>
-                      <td className="p-2">{req.reason || '-'}</td>
-                      <td className="p-2">{new Date(req.created_at).toLocaleString()}</td>
-                      <td className="p-2 flex gap-2">
-                  <button
-                    className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700"
-                    onClick={() => handleAction(req.id, 'approve')}
-                    disabled={loading}
-                  >
-                    Approve
-                  </button>
-                  <button
-                    className="bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700"
-                    onClick={() => handleAction(req.id, 'deny')}
-                    disabled={loading}
-                  >
-                    Deny
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

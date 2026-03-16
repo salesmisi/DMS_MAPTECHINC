@@ -12,6 +12,16 @@ export const requestDelete = async (req: AuthRequest, res: Response) => {
     const userId = req.userId;
     if (!['folder', 'document'].includes(type)) return res.status(400).json({ error: 'Invalid type' });
     if (!target_id || !userId) return res.status(400).json({ error: 'Missing target or user' });
+
+    // Check for existing pending request for the same target
+    const existing = await pool.query(
+      `SELECT id FROM delete_requests WHERE target_id = $1 AND status = 'pending'`,
+      [target_id]
+    );
+    if (existing.rows.length > 0) {
+      return res.status(409).json({ error: 'A pending delete request already exists for this item.' });
+    }
+
     const result = await pool.query(
       `INSERT INTO delete_requests (type, target_id, requested_by, department, reason)
        VALUES ($1, $2, $3, $4, $5) RETURNING *`,

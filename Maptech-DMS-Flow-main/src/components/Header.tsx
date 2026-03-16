@@ -30,7 +30,7 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
 
   // Use backend notifications for the dropdown; fall back to documents if none in DB yet
       const notifications = dbNotifications.length > 0
-    ? dbNotifications.filter((n) => !n.isRead).slice(0, 10).map((n) => ({
+    ? dbNotifications.slice(0, 20).map((n) => ({
         id: n.id,
         title: n.title,
         message: n.message,
@@ -38,6 +38,7 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
         type: n.type,
         documentId: n.documentId,
         createdAt: n.createdAt,
+        isRead: n.isRead,
       }))
     : isApprover
     ? documents
@@ -164,13 +165,13 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
                         await markAsRead(n.id);
                         onClick();
                       }}
-                      className="w-full flex items-start gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-left">
+                      className={`w-full flex items-start gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-left ${n.isRead ? 'opacity-60' : 'bg-[#f0fdf4]'}`}>
                       <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 ${iconBg}`}>
                         {icon}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-xs font-semibold text-gray-700 dark:text-gray-200">{label}</p>
-                        <p className="text-sm text-gray-800 dark:text-gray-200 truncate">{n.title}</p>
+                        <p className={`text-xs font-semibold ${n.isRead ? 'text-gray-500' : 'text-gray-700'} dark:text-gray-200`}>{label}</p>
+                        <p className={`text-sm truncate ${n.isRead ? 'text-gray-500' : 'text-gray-800 font-medium'} dark:text-gray-200`}>{n.title}</p>
                         <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{n.message}</p>
                         <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{new Date(n.createdAt).toLocaleString()}</p>
                       </div>
@@ -204,13 +205,17 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
           className="flex items-center gap-2 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
 
           <div
-            className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
+            className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold overflow-hidden"
             style={{
-              backgroundColor: roleColors[user?.role || 'staff'],
+              backgroundColor: user?.avatar ? 'transparent' : roleColors[user?.role || 'staff'],
               color: '#005F02'
             }}>
 
-            {user?.name?.charAt(0).toUpperCase() || 'U'}
+            {user?.avatar ? (
+              <img src={`http://localhost:5000${user.avatar}`} alt="" className="w-full h-full object-cover" />
+            ) : (
+              user?.name?.charAt(0).toUpperCase() || 'U'
+            )}
           </div>
           <div className="hidden md:block text-left">
             <p className="text-sm font-medium text-gray-800 dark:text-gray-200 leading-tight">

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -6,13 +6,18 @@ import { Input } from '../components/ui/Input';
 import { Badge } from '../components/ui/Badge';
 import { User, Mail, Building, Shield, Camera, Save, Lock } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
+
+const API_URL = 'http://localhost:5000/api';
+
 export function ProfilePage() {
-  const { user, updateProfile, changePassword, logout } = useAuth();
+  const { user, updateProfile, changePassword, logout, refreshCurrentUser } = useAuth();
   const { t } = useLanguage();
   const [isLoading, setIsLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
   const [passwordMessage, setPasswordMessage] = useState('');
   const [passwordMsgType, setPasswordMsgType] = useState<'error' | 'success' | ''>('');
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [formData, setFormData] = useState({
     name: user?.name || '',
     email: user?.email || '',
@@ -26,6 +31,38 @@ export function ProfilePage() {
       ...formData,
       [e.target.name]: e.target.value
     });
+  };
+
+  const handleAvatarClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+
+    const formPayload = new FormData();
+    formPayload.append('avatar', file);
+
+    setAvatarUploading(true);
+    try {
+      const token = localStorage.getItem('dms_token');
+      const res = await fetch(`${API_URL}/users/${user.id}/avatar`, {
+        method: 'POST',
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: formPayload,
+      });
+      if (res.ok) {
+        await refreshCurrentUser?.();
+        setSuccessMessage('Profile photo updated');
+        setTimeout(() => setSuccessMessage(''), 3000);
+      }
+    } catch (err) {
+      console.error('Avatar upload error:', err);
+    } finally {
+      setAvatarUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
   const handleProfileUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -91,11 +128,30 @@ export function ProfilePage() {
         <div className="w-full md:w-1/3 space-y-6">
           <Card className="p-6 flex flex-col items-center text-center">
             <div className="relative mb-4 group">
-              <div className="w-32 h-32 rounded-full bg-primary/10 flex items-center justify-center text-4xl font-bold text-primary border-4 border-white shadow-lg">
-                {user.name.charAt(0).toUpperCase()}
+              <div className="w-32 h-32 rounded-full bg-primary/10 flex items-center justify-center text-4xl font-bold text-primary border-4 border-white shadow-lg overflow-hidden">
+                {user.avatar ? (
+                  <img src={`http://localhost:5000${user.avatar}`} alt="Avatar" className="w-full h-full object-cover" />
+                ) : (
+                  user.name.charAt(0).toUpperCase()
+                )}
               </div>
-              <button className="absolute bottom-0 right-0 p-2 bg-white rounded-full shadow-md border border-gray-200 hover:bg-gray-50 text-gray-600 transition-colors">
-                <Camera size={18} />
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/gif,image/webp"
+                className="hidden"
+                onChange={handleAvatarChange}
+              />
+              <button
+                onClick={handleAvatarClick}
+                disabled={avatarUploading}
+                className="absolute bottom-0 right-0 p-2 bg-white rounded-full shadow-md border border-gray-200 hover:bg-gray-50 text-gray-600 transition-colors"
+              >
+                {avatarUploading ? (
+                  <div className="w-[18px] h-[18px] border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Camera size={18} />
+                )}
               </button>
             </div>
 

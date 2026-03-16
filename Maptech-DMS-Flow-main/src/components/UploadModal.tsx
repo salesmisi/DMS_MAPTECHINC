@@ -317,7 +317,7 @@ export function UploadModal({ onClose, defaultFolderId }: UploadModalProps) {
                   <input
                   type="file"
                   className="hidden"
-                  accept="video/*,.pdf,.doc,.docx,.xlsx,.jpg,.png,.tiff"
+                  accept="video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.jpg,.png,.tiff"
                   onChange={handleFileInput} />
 
                 </label>

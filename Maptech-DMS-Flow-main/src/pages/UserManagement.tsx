@@ -19,7 +19,6 @@ import { useDocuments } from '../context/DocumentContext';
 interface Department {
   id: string;
   name: string;
-  manager: string;
   description: string;
   staffCount: number;
   documentCount: number;
@@ -48,6 +47,8 @@ export function UserManagement() {
   });
   // Fix: Only one showPassword state for the password field
   const [showPassword, setShowPassword] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; name: string } | null>(null);
+  const [deleteDeptConfirm, setDeleteDeptConfirm] = useState<{ id: string; name: string } | null>(null);
 
   // Fetch departments from API on mount
   const fetchDepartments = async () => {
@@ -106,16 +107,20 @@ export function UserManagement() {
   };
 
   // Delete department via API
-  const handleDeleteDepartment = async (id: string, name: string) => {
-    if (!window.confirm(`Delete department "${name}"?`)) return;
+  const handleDeleteDepartment = (id: string, name: string) => {
+    setDeleteDeptConfirm({ id, name });
+  };
+  const confirmDeleteDepartment = async () => {
+    if (!deleteDeptConfirm) return;
     try {
       const token = localStorage.getItem('dms_token');
-      const res = await fetch(`http://localhost:5000/api/departments/${id}`, {
+      const res = await fetch(`http://localhost:5000/api/departments/${deleteDeptConfirm.id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` }
       });
       if (res.ok) {
-        setDepartments((prev) => prev.filter((d) => d.id !== id));
+        setDepartments((prev) => prev.filter((d) => d.id !== deleteDeptConfirm.id));
+        window.dispatchEvent(new Event('dms-folders-refresh'));
       } else {
         const errData = await res.json();
         alert(errData.error || 'Failed to delete department');
@@ -124,6 +129,7 @@ export function UserManagement() {
       console.error('Failed to delete department:', err);
       alert('Failed to delete department');
     }
+    setDeleteDeptConfirm(null);
   };
 
   const filteredUsers = users.filter(
@@ -172,19 +178,24 @@ export function UserManagement() {
     });
   };
   const handleDeleteUser = async (id: string, name: string) => {
-    if (window.confirm(`Are you sure you want to delete user "${name}"?`)) {
-      await deleteUser(id);
-      addLog({
-        userId: 'user-1',
-        userName: 'Admin User',
-        userRole: 'admin',
-        action: 'USER_DELETED',
-        target: name,
-        targetType: 'user',
-        timestamp: new Date().toISOString(),
-        ipAddress: '192.168.1.100'
-      });
-    }
+    setDeleteConfirm({ id, name });
+  };
+  const confirmDeleteUser = async () => {
+    if (!deleteConfirm) return;
+    await deleteUser(deleteConfirm.id);
+    addLog({
+      userId: 'user-1',
+      userName: 'Admin User',
+      userRole: 'admin',
+      action: 'USER_DELETED',
+      target: deleteConfirm.name,
+      targetType: 'user',
+      timestamp: new Date().toISOString(),
+      ipAddress: '192.168.1.100'
+    });
+    // Refresh folders since user's folders were also deleted
+    window.dispatchEvent(new Event('dms-folders-refresh'));
+    setDeleteConfirm(null);
   };
   const roleColors: Record<string, string> = {
     admin: 'bg-yellow-100 text-yellow-800',
@@ -329,15 +340,6 @@ export function UserManagement() {
                       <UserCheck size={15} />
                       }
                         </button>
-                        <button
-                      onClick={() =>
-                      alert(`Password reset link sent to ${u.email}`)
-                      }
-                      className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                      title="Reset Password">
-
-                          <Key size={15} />
-                        </button>
                         {u.id !== 'user-1' &&
                     <button
                       onClick={() => handleDeleteUser(u.id, u.name)}
@@ -387,13 +389,7 @@ export function UserManagement() {
                   {dept.name}
                 </h4>
                 <p className="text-xs text-gray-500 mb-3">{dept.description}</p>
-                <div className="flex items-center justify-between text-xs text-gray-500">
-                  <span>
-                    Manager:{' '}
-                    <span className="font-medium text-gray-700">
-                      {dept.manager}
-                    </span>
-                  </span>
+                <div className="flex items-center justify-end text-xs text-gray-500">
                   <span>
                     {dept.staffCount} staff · {dept.documentCount} docs
                   </span>
@@ -607,6 +603,69 @@ export function UserManagement() {
           </div>
         </div>
       }
+
+      {/* Delete User Confirmation Modal */}
+      {deleteConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+            <div className="flex flex-col items-center text-center">
+              <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mb-4">
+                <Trash2 className="text-red-600" size={24} />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-800 mb-2">Delete User</h3>
+              <p className="text-sm text-gray-600 mb-1">
+                Are you sure you want to delete <span className="font-semibold">"{deleteConfirm.name}"</span>?
+              </p>
+              <p className="text-sm text-red-600 font-medium mb-5">
+                ⚠️ All folders and documents created by this user will be permanently deleted. If this user is the last member of their department, the department folder will also be removed.
+              </p>
+              <div className="flex gap-3 w-full">
+                <button
+                  onClick={confirmDeleteUser}
+                  className="flex-1 py-2.5 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 transition-colors">
+                  Delete
+                </button>
+                <button
+                  onClick={() => setDeleteConfirm(null)}
+                  className="flex-1 py-2.5 border border-gray-300 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Delete Department Confirmation Modal */}
+      {deleteDeptConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+            <div className="flex flex-col items-center text-center">
+              <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mb-4">
+                <Building2 className="text-red-600" size={24} />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-800 mb-2">Delete Department</h3>
+              <p className="text-sm text-gray-600 mb-1">
+                Are you sure you want to delete <span className="font-semibold">"{deleteDeptConfirm.name}"</span>?
+              </p>
+              <p className="text-sm text-red-600 font-medium mb-5">
+                ⚠️ All folders and documents under this department will be permanently deleted.
+              </p>
+              <div className="flex gap-3 w-full">
+                <button
+                  onClick={confirmDeleteDepartment}
+                  className="flex-1 py-2.5 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 transition-colors">
+                  Delete
+                </button>
+                <button
+                  onClick={() => setDeleteDeptConfirm(null)}
+                  className="flex-1 py-2.5 border border-gray-300 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>);
 
 }

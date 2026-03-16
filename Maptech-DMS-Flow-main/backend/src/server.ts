@@ -19,6 +19,9 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
+// Serve uploaded files statically
+app.use('/uploads', express.static(uploadsDir));
+
 app.get('/', (req, res) => res.send('API running'));
 
 // Auto-migration: ensure schema is up to date

@@ -32,10 +32,12 @@ const RequestDeleteModal: React.FC<Props> = ({ document, onClose, onRequested })
           reason,
         }),
       });
-      if (!res.ok) throw new Error('Failed to request delete');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to request delete');
       setSuccess(true);
       await fetchNotifications();
       onRequested();
+      setTimeout(onClose, 1500);
     } catch (err: any) {
       setError(err.message || 'Failed to request delete');
     } finally {
@@ -55,8 +57,8 @@ const RequestDeleteModal: React.FC<Props> = ({ document, onClose, onRequested })
           value={reason}
           onChange={e => setReason(e.target.value)}
         />
-        {error && <div className="text-red-600 mb-2">{error}</div>}
-        {success && <div className="text-green-600 mb-2">Request sent for approval.</div>}
+        {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-3">⚠️ {error}</div>}
+        {success && <div className="bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg px-4 py-3 mb-3">✅ Delete request sent successfully!</div>}
         <div className="flex gap-2 justify-end">
           <button
             className="px-4 py-2 rounded bg-gray-200 hover:bg-gray-300"

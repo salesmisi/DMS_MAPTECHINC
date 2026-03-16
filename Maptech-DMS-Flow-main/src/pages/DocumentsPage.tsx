@@ -340,10 +340,30 @@ export function DocumentsPage() {
       alert('Failed to download file.');
     }
   };
+  const [sidebarWidth, setSidebarWidth] = useState(224);
+  const isResizing = React.useRef(false);
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    isResizing.current = true;
+    e.preventDefault();
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!isResizing.current) return;
+      const newWidth = Math.min(Math.max(ev.clientX - 16, 160), 480);
+      setSidebarWidth(newWidth);
+    };
+    const onMouseUp = () => {
+      isResizing.current = false;
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  };
+
   return (
     <div className="flex gap-6 h-full">
       {/* Folder Tree Sidebar */}
-      <div className="ft-container w-56 flex-shrink-0 bg-white rounded-xl shadow-sm border border-gray-100 p-3">
+      <div className="ft-container flex-shrink-0 bg-white rounded-xl shadow-sm border border-gray-100 p-3 relative" style={{ width: sidebarWidth }}>
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
             <FolderOpen size={16} className="text-[#427A43]" />
@@ -384,6 +404,11 @@ export function DocumentsPage() {
           />
           )}
         </div>
+        {/* Resize handle */}
+        <div
+          onMouseDown={handleMouseDown}
+          className="absolute top-0 right-0 w-1.5 h-full cursor-col-resize hover:bg-[#427A43]/30 rounded-r-xl transition-colors"
+        />
       </div>
 
       {/* Main Content */}

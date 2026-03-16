@@ -20,6 +20,7 @@ const router = express.Router();
 router.get('/', authenticate, documentController.listDocuments);
 router.post('/', authenticate, upload.single('file'), documentController.createDocument);
 router.get('/:id/download', authenticate, documentController.downloadDocument);
+router.get('/:id/preview', authenticate, documentController.previewDocument);
 router.patch('/:id/approve', authenticate, documentController.approveDocument);
 router.patch('/:id/reject', authenticate, documentController.rejectDocument);
 router.patch('/:id/trash', authenticate, documentController.trashDocument);

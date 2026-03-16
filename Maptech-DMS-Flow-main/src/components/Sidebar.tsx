@@ -160,13 +160,17 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
         <div className="px-4 py-3 border-b border-[#cad4ca]">
             <div className="flex items-center gap-3">
               <div
-              className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
+              className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 overflow-hidden"
               style={{
-                backgroundColor: roleColors[user.role],
+                backgroundColor: user.avatar ? 'transparent' : roleColors[user.role],
                 color: '#005F02'
               }}>
 
-                {user.name.charAt(0).toUpperCase()}
+                {user.avatar ? (
+                  <img src={`http://localhost:5000${user.avatar}`} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  user.name.charAt(0).toUpperCase()
+                )}
               </div>
               <div className="min-w-0">
                 <div className="text-[#eeece8] text-sm font-medium truncate">
