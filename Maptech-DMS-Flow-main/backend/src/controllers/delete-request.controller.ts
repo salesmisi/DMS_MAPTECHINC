@@ -36,11 +36,19 @@ export const requestDelete = async (req: AuthRequest, res: Response) => {
 // Admin: List all pending delete requests
 export const listDeleteRequests = async (req: AuthRequest, res: Response) => {
   try {
-    const result = await pool.query(
-      `SELECT dr.*, u.name as requested_by_name FROM delete_requests dr
-       LEFT JOIN users u ON dr.requested_by = u.id
-       WHERE dr.status = 'pending' ORDER BY dr.created_at ASC`
-    );
+    const allowed = new Set(['pending', 'approved', 'denied', 'all']);
+    const status = String(req.query.status || 'pending').toLowerCase();
+    const baseSQL = `SELECT dr.*, u.name as requested_by_name FROM delete_requests dr
+       LEFT JOIN users u ON dr.requested_by = u.id`;
+    let result;
+    if (!allowed.has(status)) {
+      return res.status(400).json({ error: 'Invalid status' });
+    }
+    if (status === 'all') {
+      result = await pool.query(`${baseSQL} ORDER BY dr.created_at ASC`);
+    } else {
+      result = await pool.query(`${baseSQL} WHERE dr.status = $1 ORDER BY dr.created_at ASC`, [status]);
+    }
     return res.json(result.rows);
   } catch (err) {
     console.error('listDeleteRequests error:', err);

@@ -49,6 +49,7 @@ const resources: Record<LangCode, any> = {
       trash: 'Trash',
       'activity-log': 'Activity Log',
       approvals: 'Pending Approvals',
+        'admin-delete-requests': 'Delete Request',
       profile: 'My Profile',
       settings: 'Settings'
     }
@@ -97,6 +98,7 @@ const resources: Record<LangCode, any> = {
       trash: 'Trash',
       'activity-log': 'Activity Log',
       approvals: 'Mga Pending na Pag-apruba',
+      'admin-delete-requests': 'Delete Request',
       profile: 'Aking Profile',
       settings: 'Mga Setting'
     }
