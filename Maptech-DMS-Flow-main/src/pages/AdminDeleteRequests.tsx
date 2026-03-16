@@ -125,7 +125,7 @@ export default function AdminDeleteRequests() {
       {/* Status tabs */}
       <div className="flex items-center gap-4 mb-4">
           <div className="flex w-full rounded-lg overflow-visible shadow-sm relative">
-            <span className="absolute -top-4 left-1/2 -translate-x-1/2 z-10">
+            <span className="absolute -top-2 left-11 -translate-x-12 z-10">
               <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-red-600 text-white text-xs border-2 border-white">{counts.pending}</span>
             </span>
             <button
