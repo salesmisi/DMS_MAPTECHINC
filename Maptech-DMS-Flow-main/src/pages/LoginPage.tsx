@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { Eye, EyeOff, Lock, Mail } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
 
 export function LoginPage() {
   const { login } = useAuth();
+  const { t } = useLanguage();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -15,7 +17,7 @@ export function LoginPage() {
     setError('');
 
     if (!email || !password) {
-      setError('Please enter your email and password.');
+      setError(t('loginValidation'));
       return;
     }
 
@@ -24,7 +26,7 @@ export function LoginPage() {
     const success = await login(email, password);
 
     if (!success) {
-      setError('Invalid email or password. Please try again.');
+      setError(t('loginError'));
     }
 
     setLoading(false);
@@ -41,7 +43,7 @@ export function LoginPage() {
         playsInline
         className="absolute inset-0 w-full h-full object-cover"
       >
-        <source src="/background.mp4" type="video/mp4" />
+        <source src="/maptech_bg.mp4" type="video/mp4" />
       </video>
 
       {/* DARK OVERLAY */}
@@ -59,18 +61,18 @@ export function LoginPage() {
               className="w-66 object-contain mx-auto mb-4"
             />
             <p className="text-white text-lg font-semibold">
-              Document Management System
+              {t('documentManagementSystem')}
             </p>
             <p className="text-white/70 text-xs mt-1">
-              Maptech Information Solution Inc.
+              {t('maptechCompany')}
             </p>
           </div>
 
           {/* LOGIN FORM CARD */}
-          <div className="bg-white/95 rounded-2xl shadow-2xl p-8 border border-[#C0B87A]/30">
+          <div className="bg-white/90 rounded-2xl shadow-2xl p-8 border border-[#C0B87A]/30">
 
             <h2 className="text-xl font-semibold text-gray-800 mb-6 text-center">
-              Sign In
+              {t('signIn')}
             </h2>
 
             {error && (
@@ -84,7 +86,7 @@ export function LoginPage() {
               {/* EMAIL */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  Email Address
+                  {t('emailAddress')}
                 </label>
                 <div className="relative">
                   <Mail
@@ -95,7 +97,7 @@ export function LoginPage() {
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="your@maptech.com"
+                    placeholder={t('emailPlaceholder')}
                     className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#427A43] focus:border-transparent"
                   />
                 </div>
@@ -104,7 +106,7 @@ export function LoginPage() {
               {/* PASSWORD */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  Password
+                  {t('password')}
                 </label>
                 <div className="relative">
                   <Lock
@@ -115,7 +117,7 @@ export function LoginPage() {
                     type={showPassword ? 'text' : 'password'}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Enter your password"
+                    placeholder={t('enterPassword')}
                     className="w-full pl-10 pr-10 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#427A43] focus:border-transparent"
                   />
                   <button
@@ -137,14 +139,14 @@ export function LoginPage() {
                   backgroundColor: loading ? '#427A43' : '#005F02'
                 }}
               >
-                {loading ? 'Signing in...' : 'Sign In'}
+                {loading ? t('signingIn') : t('signIn')}
               </button>
 
             </form>
           </div>
 
           <p className="text-center text-xs text-white/60 mt-6">
-            © 2025 Maptech Information Solution Inc.
+            {t('copyright')}
           </p>
 
         </div>

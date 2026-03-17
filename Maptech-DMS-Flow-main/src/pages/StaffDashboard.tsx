@@ -11,11 +11,13 @@ import {
 import { useDocuments } from '../context/DocumentContext';
 import { useAuth } from '../context/AuthContext';
 import { useNavigation } from '../App';
+import { useLanguage } from '../context/LanguageContext';
 import { UploadModal } from '../components/UploadModal';
 export function StaffDashboard() {
   const { documents } = useDocuments();
   const { user } = useAuth();
   const { navigate } = useNavigation();
+  const { t } = useLanguage();
   const [showUpload, setShowUpload] = useState(false);
   const myDocs = documents.filter(
     (d) => d.uploadedById === user?.id && d.status !== 'trashed'
@@ -51,10 +53,10 @@ export function StaffDashboard() {
       <div className="bg-[#005F02] rounded-2xl p-6 text-white flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold mb-1">
-            Welcome, {user?.name?.split(' ')[0]}!
+            {t('welcome')}{user?.name?.split(' ')[0]}!
           </h2>
           <p className="text-[#C0B87A] text-sm">
-            {user?.department} Department
+            {user?.department} {t('departmentSuffix')}
           </p>
         </div>
         <button
@@ -62,7 +64,7 @@ export function StaffDashboard() {
           className="flex items-center gap-2 px-4 py-2.5 bg-[#C0B87A] text-[#005F02] font-semibold rounded-xl hover:bg-[#F2E3BB] transition-colors text-sm">
 
           <Plus size={18} />
-          Upload Document
+          {t('uploadDocument')}
         </button>
       </div>
 
@@ -77,7 +79,7 @@ export function StaffDashboard() {
               <p className="text-2xl font-bold text-gray-800">
                 {myDocs.length}
               </p>
-              <p className="text-xs text-gray-500">My Documents</p>
+              <p className="text-xs text-gray-500">{t('myDocuments')}</p>
             </div>
           </div>
         </div>
@@ -90,7 +92,7 @@ export function StaffDashboard() {
               <p className="text-2xl font-bold text-gray-800">
                 {myPending.length}
               </p>
-              <p className="text-xs text-gray-500">Pending</p>
+              <p className="text-xs text-gray-500">{t('pending')}</p>
             </div>
           </div>
         </div>
@@ -103,7 +105,7 @@ export function StaffDashboard() {
               <p className="text-2xl font-bold text-gray-800">
                 {myApproved.length}
               </p>
-              <p className="text-xs text-gray-500">Approved</p>
+              <p className="text-xs text-gray-500">{t('approved')}</p>
             </div>
           </div>
         </div>
@@ -115,7 +117,7 @@ export function StaffDashboard() {
           <XCircle size={20} className="text-red-500 flex-shrink-0 mt-0.5" />
           <div>
             <p className="text-sm font-medium text-red-700">
-              {myRejected.length} document(s) rejected
+              {myRejected.length} {t('documentsRejected')}
             </p>
             <p className="text-xs text-red-500 mt-0.5">
               Please review the rejection reasons and resubmit.

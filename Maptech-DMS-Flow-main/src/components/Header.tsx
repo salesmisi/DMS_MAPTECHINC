@@ -51,8 +51,8 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
         .slice(0, 5)
         .map((d) => ({
           id: d.id,
-          title: `Approval Needed`,
-          message: `"${d.title}" needs approval`,
+          title: t('approvalNeeded'),
+          message: `"${d.title}" ${t('needsApproval')}`,
           time: d.date,
           type: 'approval',
           documentId: d.id,
@@ -65,9 +65,9 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
     staff: '#F2E3BB'
   };
   const roleLabels: Record<string, string> = {
-    admin: 'Administrator',
-    manager: 'Department Manager',
-    staff: 'Staff'
+    admin: t('administrator'),
+    manager: t('departmentManager'),
+    staff: t('staff')
   };
   return (
     <header className="bg-white dark:bg-[#1e1e1e] border-b-2 border-[#427A43] px-4 py-3 flex items-center gap-4 z-10 flex-shrink-0">
@@ -85,7 +85,7 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
           {t(`pageTitles.${currentPage}`) || 'Dashboard'}
         </h1>
         <p className="text-xs text-gray-500 dark:text-gray-400">
-          Maptech Information Solution Inc. — Document Management System
+          {t('maptechSubtitle')}
         </p>
       </div>
 
@@ -98,7 +98,7 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
             if (val.trim()) navigate('documents');
           }}
           suggestions={docSuggestions}
-          placeholder="Search documents..."
+          placeholder={t('searchDocuments')}
           className="bg-gray-100 dark:bg-[#2a2a2a] rounded-lg px-3 py-2"
           inputClassName="dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500"
         />
@@ -108,7 +108,7 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
       <button
         onClick={toggleTheme}
         className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-gray-600 dark:text-gray-300"
-        title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}>
+        title={theme === 'dark' ? t('switchToLightMode') : t('switchToDarkMode')}>
       </button>
 
 
@@ -131,34 +131,34 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
         {showNotifications && (
           <div className="absolute right-0 top-full mt-2 w-80 bg-white dark:bg-[#1e1e1e] rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 z-50">
             <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-700">
-              <h3 className="font-semibold text-gray-800 dark:text-gray-100">Notifications</h3>
-              <p className="text-xs text-gray-500 dark:text-gray-400">{unreadCount} unread</p>
+              <h3 className="font-semibold text-gray-800 dark:text-gray-100">{t('notifications')}</h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400">{unreadCount} {t('unread')}</p>
             </div>
             <div className="max-h-64 overflow-y-auto">
               {notifications.length === 0 ? (
-                <div className="px-4 py-6 text-center text-gray-500 dark:text-gray-400 text-sm">No notifications</div>
+                <div className="px-4 py-6 text-center text-gray-500 dark:text-gray-400 text-sm">{t('noNotifications')}</div>
               ) : (
                 notifications.map((n) => {
                   let icon, iconBg, label, onClick;
                   if (n.type === 'activity-log-export') {
                     icon = <FileText size={14} className="text-orange-600" />;
                     iconBg = 'bg-orange-100';
-                    label = 'Activity Log Export';
+                    label = t('activityLogExport');
                     onClick = () => { navigate('activity-log'); setShowNotifications(false); };
                   } else if (n.type === 'delete-request') {
                     icon = <FileText size={14} className="text-red-600" />;
                     iconBg = 'bg-red-100';
-                    label = 'Delete Request';
+                    label = t('deleteRequest');
                     onClick = () => { navigate('admin-delete-requests'); setShowNotifications(false); };
                   } else if (n.type === 'delete-approved') {
                     icon = <CheckCheck size={14} className="text-green-600" />;
                     iconBg = 'bg-green-100';
-                    label = 'Delete Approved';
+                    label = t('deleteApproved');
                     onClick = () => { setShowNotifications(false); };
                   } else if (n.type === 'delete-denied') {
                     icon = <FileText size={14} className="text-gray-600" />;
                     iconBg = 'bg-gray-200';
-                    label = 'Delete Denied';
+                    label = t('deleteDenied');
                     onClick = () => { setShowNotifications(false); };
                   } else {
                     icon = <FileText size={14} className="text-yellow-600" />;
@@ -195,7 +195,7 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
                   className="flex items-center gap-1 text-xs text-gray-500 hover:text-[#005F02] transition-colors"
                   title="Mark all as read">
                   <CheckCheck size={14} />
-                  Mark all read
+                  {t('markAllRead')}
                 </button>
               </div>
             )}
@@ -270,7 +270,7 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
               className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
 
                 <User size={16} className="text-gray-400" />
-                My Profile
+                {t('myProfile')}
               </button>
               <button
               onClick={() => {
@@ -280,7 +280,7 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
               className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
 
                 <Settings size={16} className="text-gray-400" />
-                Settings
+                {t('settings')}
               </button>
             </div>
             <div className="border-t border-gray-100 dark:border-gray-700 py-1">
@@ -292,7 +292,7 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
               className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors">
 
                 <LogOut size={16} />
-                Sign Out
+                {t('signOut')}
               </button>
             </div>
           </div>

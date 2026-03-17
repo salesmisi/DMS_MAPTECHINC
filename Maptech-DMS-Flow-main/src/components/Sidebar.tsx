@@ -20,6 +20,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { useNavigation, PageName } from '../App';
 import { useDocuments } from '../context/DocumentContext';
+import { useLanguage } from '../context/LanguageContext';
 interface SidebarProps {
   isOpen: boolean;
   onToggle: () => void;
@@ -39,12 +40,13 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
   const { user, logout } = useAuth();
   const { currentPage, navigate } = useNavigation();
   const { documents } = useDocuments();
+  const { t } = useLanguage();
   const [expandedItems, setExpandedItems] = useState<string[]>(['documents']);
   const pendingCount = documents.filter((d) => d.status === 'pending').length;
   const navItems: NavItem[] = [
   {
     id: 'dashboard',
-    label: 'Dashboard',
+    label: t('dashboard'),
     icon: <LayoutDashboard size={18} />,
     roles: ['admin', 'manager', 'staff']
   },
@@ -52,7 +54,7 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
   [
   {
     id: 'approvals' as PageName,
-    label: 'Pending Approvals',
+    label: t('pendingApprovals'),
     icon: <CheckSquare size={18} />,
     roles: ['manager'],
     badge: pendingCount
@@ -61,13 +63,13 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
   []),
   {
     id: 'documents',
-    label: 'Documents',
+    label: t('documents'),
     icon: <FileText size={18} />,
     roles: ['admin', 'manager', 'staff']
   },
   {
     id: 'scanner',
-    label: 'Scanner Dashboard',
+    label: t('scannerDashboard'),
     icon: <Scan size={18} />,
     roles: ['admin', 'manager', 'staff']
   },
@@ -75,13 +77,13 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
   [
     {
       id: 'users' as PageName,
-      label: 'User Management',
+      label: t('userManagement'),
       icon: <Users size={18} />,
       roles: ['admin']
     },
     {
       id: 'admin-delete-requests' as PageName,
-      label: 'Delete Requests',
+      label: t('deleteRequests'),
       icon: <Trash2 size={18} />,
       roles: ['admin']
     }
@@ -89,13 +91,13 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
   []),
   {
     id: 'archive',
-    label: 'Archives',
+    label: t('archives'),
     icon: <Archive size={18} />,
     roles: ['admin', 'manager', 'staff']
   },
   {
     id: 'trash',
-    label: 'Trash',
+    label: t('trash'),
     icon: <Trash2 size={18} />,
     roles: ['admin', 'manager', 'staff']
   },
@@ -103,7 +105,7 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
   [
   {
     id: 'activity-log' as PageName,
-    label: 'Activity Log',
+    label: t('activityLog'),
     icon: <Activity size={18} />,
     roles: ['admin']
   }] :
@@ -119,9 +121,9 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
     staff: '#F2E3BB'
   };
   const roleLabels: Record<string, string> = {
-    admin: 'Administrator',
-    manager: 'Department Manager',
-    staff: 'Staff'
+    admin: t('administrator'),
+    manager: t('departmentManager'),
+    staff: t('staff')
   };
   return (
     <>
@@ -184,7 +186,7 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
             {user.role === 'admin' &&
           <div className="mt-2 flex items-center gap-1 text-[#eeece8] text-xs">
                 <Shield size={12} />
-                <span>Full Access</span>
+                <span>{t('fullAccess')}</span>
               </div>
           }
           </div>
@@ -232,7 +234,7 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
             className="w-full flex items-center gap-3 px-4 py-2.5 text-[#eeece8] hover:bg-red-700 hover:text-white rounded transition-colors">
 
             <LogOut size={18} className="flex-shrink-0" />
-            {isOpen && <span className="text-sm font-medium">Logout</span>}
+            {isOpen && <span className="text-sm font-medium">{t('logout')}</span>}
           </button>
         </div>
       </div>

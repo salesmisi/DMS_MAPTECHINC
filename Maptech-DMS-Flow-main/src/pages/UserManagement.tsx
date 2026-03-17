@@ -16,6 +16,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { useDocuments } from '../context/DocumentContext';
 import { AutocompleteSearch } from '../components/AutocompleteSearch';
+import { useLanguage } from '../context/LanguageContext';
 
 interface Department {
   id: string;
@@ -28,6 +29,7 @@ interface Department {
 export function UserManagement() {
   const { user: currentUser, users, addUser, updateUser, deleteUser, resetPassword } = useAuth();
   const { addLog } = useDocuments();
+  const { t } = useLanguage();
   const [search, setSearch] = useState('');
   const [showAddUser, setShowAddUser] = useState(false);
   const [showAddDept, setShowAddDept] = useState(false);
@@ -82,7 +84,7 @@ export function UserManagement() {
   // Create department via API
   const handleCreateDepartment = async () => {
     if (!newDept.name) {
-      alert('Department name is required.');
+      alert(t('departmentNameRequiredMsg'));
       return;
     }
     try {
@@ -174,7 +176,7 @@ export function UserManagement() {
   const handleAddUser = async () => {
     setAddUserError('');
     if (!newUser.name || !newUser.email || !newUser.password || !newUser.department) {
-      setAddUserError('Please fill in all required fields including department.');
+      setAddUserError(t('fillRequiredFields'));
       return;
     }
     const result = await addUser(newUser);
@@ -254,10 +256,10 @@ export function UserManagement() {
         <div>
           <h2 className="text-2xl font-bold mb-1 flex items-center gap-3">
             <Users size={28} />
-            User Management
+            {t('userManagement')}
           </h2>
           <p className="text-[#C0B87A] text-sm">
-            Manage system users and departments
+            {t('manageUsersAndDepts')}
           </p>
         </div>
         <button
@@ -265,7 +267,7 @@ export function UserManagement() {
           className="flex items-center gap-2 px-4 py-2.5 bg-[#C0B87A] text-[#005F02] font-semibold text-sm rounded-xl hover:bg-[#F2E3BB] transition-colors">
 
           <Plus size={18} />
-          Add User
+          {t('addUser')}
         </button>
       </div>
 
@@ -275,13 +277,13 @@ export function UserManagement() {
           onClick={() => setActiveTab('users')}
           className={`px-5 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === 'users' ? 'bg-[#005F02] text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
 
-          Users ({users.length})
+          {t('users')} ({users.length})
         </button>
         <button
           onClick={() => setActiveTab('departments')}
           className={`px-5 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === 'departments' ? 'bg-[#005F02] text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
 
-          Departments ({departments.length})
+          {t('departments')} ({departments.length})
         </button>
       </div>
 
@@ -292,7 +294,7 @@ export function UserManagement() {
             value={search}
             onChange={setSearch}
             suggestions={userSuggestions}
-            placeholder="Search users..."
+            placeholder={t('searchUsers')}
             className="bg-white rounded-xl px-4 py-3 shadow-sm border border-gray-100 max-w-md"
           />
 
@@ -302,22 +304,22 @@ export function UserManagement() {
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-100">
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">
-                    User
+                    {t('user')}
                   </th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase hidden md:table-cell">
-                    Role
+                    {t('role')}
                   </th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase hidden lg:table-cell">
-                    Department
+                    {t('department')}
                   </th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">
-                    Status
+                    {t('status')}
                   </th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase hidden lg:table-cell">
-                    Created
+                    {t('created')}
                   </th>
                   <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase text-right">
-                    Actions
+                    {t('actions')}
                   </th>
                 </tr>
               </thead>
@@ -372,7 +374,7 @@ export function UserManagement() {
                       onClick={() => handleToggleStatus(u.id, u.status)}
                       className={`p-1.5 rounded transition-colors ${u.status === 'active' ? 'text-gray-400 hover:text-red-600 hover:bg-red-50' : 'text-gray-400 hover:text-green-600 hover:bg-green-50'}`}
                       title={
-                      u.status === 'active' ? 'Deactivate' : 'Activate'
+                      u.status === 'active' ? t('deactivate') : t('activate')
                       }>
 
                           {u.status === 'active' ?
@@ -384,14 +386,14 @@ export function UserManagement() {
                         <button
                       onClick={() => { setResetPwUser({ id: u.id, name: u.name }); setResetPwValue(''); setResetPwShow(false); setResetPwStatus('idle'); setResetPwError(''); }}
                       className="p-1.5 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded transition-colors"
-                      title="Reset Password">
+                      title={t('resetPassword')}>
                           <Key size={15} />
                         </button>
                         {u.id !== 'user-1' &&
                     <button
                       onClick={() => handleDeleteUser(u.id, u.name)}
                       className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-                      title="Delete User">
+                      title={t('deleteUser')}>
 
                             <Trash2 size={15} />
                           </button>
@@ -413,7 +415,7 @@ export function UserManagement() {
           className="flex items-center gap-2 px-4 py-2.5 bg-[#005F02] text-white text-sm font-medium rounded-xl hover:bg-[#427A43] transition-colors">
 
             <Plus size={16} />
-            Add Department
+            {t('addDepartment')}
           </button>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {departments.map((dept) =>
@@ -438,7 +440,7 @@ export function UserManagement() {
                 <p className="text-xs text-gray-500 mb-3">{dept.description}</p>
                 <div className="flex items-center justify-end text-xs text-gray-500">
                   <span>
-                    {dept.staffCount} staff · {dept.documentCount} docs
+                    {dept.staffCount} {t('staffCount')} · {dept.documentCount} {t('docsCount')}
                   </span>
                 </div>
               </div>
@@ -455,44 +457,44 @@ export function UserManagement() {
           {addUserError && (
             <div className="fixed inset-0 flex items-center justify-center z-50">
               <div className="bg-white border border-red-300 rounded-xl shadow-2xl px-8 py-6 flex flex-col items-center justify-center">
-                <span className="text-red-600 font-semibold text-lg mb-2">Error</span>
+                <span className="text-red-600 font-semibold text-lg mb-2">{t('error')}</span>
                 <span className="text-gray-800 text-center mb-4">{addUserError}</span>
                 <button
                   className="mt-2 px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
                   onClick={() => setAddUserError('')}
                 >
-                  OK
+                  {t('ok')}
                 </button>
               </div>
             </div>
           )}
             <div className="p-6 border-b border-gray-100">
               <h3 className="font-semibold text-gray-800 text-lg">
-                Add New User
+                {t('addNewUser')}
               </h3>
               <p className="text-sm text-gray-500 mt-0.5">
-                Create a new system account
+                {t('createNewAccount')}
               </p>
             </div>
             <div className="p-6 space-y-4">
               {[
             {
-              label: 'Full Name *',
+              label: t('fullNameRequired'),
               key: 'name',
               type: 'text',
-              placeholder: 'John Doe'
+              placeholder: t('johnDoe')
             },
             {
-              label: 'Email Address *',
+              label: t('emailRequired'),
               key: 'email',
               type: 'email',
-              placeholder: 'john@maptech.com'
+              placeholder: t('johnEmail')
             },
             {
-              label: 'Password *',
+              label: t('passwordRequired'),
               key: 'password',
               type: 'password',
-              placeholder: 'Min. 6 characters'
+              placeholder: t('minSixChars')
             }].
             map((field) => {
               if (field.key === 'password') {
@@ -546,7 +548,7 @@ export function UserManagement() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                    Role
+                    {t('role')}
                   </label>
                   <select
                   value={newUser.role}
@@ -558,14 +560,14 @@ export function UserManagement() {
                   }
                   className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#427A43]">
 
-                    <option value="staff">Staff</option>
-                    <option value="manager">Manager</option>
-                    <option value="admin">Admin</option>
+                    <option value="staff">{t('staff')}</option>
+                    <option value="manager">{t('manager')}</option>
+                    <option value="admin">{t('admin')}</option>
                   </select>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                    Department
+                    {t('department')}
                   </label>
                   <select
                   value={newUser.department}
@@ -576,7 +578,7 @@ export function UserManagement() {
                   }))
                   }
                   className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#427A43]">
-                    <option value="">Select department...</option>
+                    <option value="">{t('selectDepartment')}</option>
                     {departments.map((dept) =>
                   <option key={dept.id} value={dept.name}>
                         {dept.name}
@@ -591,13 +593,13 @@ export function UserManagement() {
               onClick={handleAddUser}
               className="flex-1 py-2.5 bg-[#005F02] text-white text-sm font-semibold rounded-lg hover:bg-[#427A43] transition-colors">
 
-                Create User
+                {t('createUser')}
               </button>
               <button
               onClick={() => setShowAddUser(false)}
               className="flex-1 py-2.5 border border-gray-300 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">
 
-                Cancel
+                {t('cancel')}
               </button>
             </div>
           </div>
@@ -610,13 +612,13 @@ export function UserManagement() {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
             <div className="p-6 border-b border-gray-100">
               <h3 className="font-semibold text-gray-800 text-lg">
-                Add New Department
+                {t('addNewDepartment')}
               </h3>
             </div>
             <div className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  Department Name *
+                  {t('departmentNameRequired')}
                 </label>
                 <input
                 type="text"
@@ -627,7 +629,7 @@ export function UserManagement() {
                   name: e.target.value
                 }))
                 }
-                placeholder="e.g. Operations"
+                placeholder={t('egOperations')}
                 className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#427A43]" />
 
               </div>
@@ -638,13 +640,13 @@ export function UserManagement() {
               onClick={handleCreateDepartment}
               className="flex-1 py-2.5 bg-[#005F02] text-white text-sm font-semibold rounded-lg hover:bg-[#427A43] transition-colors">
 
-                Create Department
+                {t('createDepartment')}
               </button>
               <button
               onClick={() => setShowAddDept(false)}
               className="flex-1 py-2.5 border border-gray-300 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">
 
-                Cancel
+                {t('cancel')}
               </button>
             </div>
           </div>
@@ -659,23 +661,23 @@ export function UserManagement() {
               <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mb-4">
                 <Trash2 className="text-red-600" size={24} />
               </div>
-              <h3 className="text-lg font-semibold text-gray-800 mb-2">Delete User</h3>
+              <h3 className="text-lg font-semibold text-gray-800 mb-2">{t('deleteUser')}</h3>
               <p className="text-sm text-gray-600 mb-1">
-                Are you sure you want to delete <span className="font-semibold">"{deleteConfirm.name}"</span>?
+                {t('deleteUserConfirm')} <span className="font-semibold">"{deleteConfirm.name}"</span>?
               </p>
               <p className="text-sm text-red-600 font-medium mb-5">
-                ⚠️ All folders and documents created by this user will be permanently deleted. If this user is the last member of their department, the department folder will also be removed.
+                {t('deleteUserWarning')}
               </p>
               <div className="flex gap-3 w-full">
                 <button
                   onClick={confirmDeleteUser}
                   className="flex-1 py-2.5 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 transition-colors">
-                  Delete
+                  {t('delete')}
                 </button>
                 <button
                   onClick={() => setDeleteConfirm(null)}
                   className="flex-1 py-2.5 border border-gray-300 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">
-                  Cancel
+                  {t('cancel')}
                 </button>
               </div>
             </div>
@@ -690,23 +692,23 @@ export function UserManagement() {
               <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mb-4">
                 <Building2 className="text-red-600" size={24} />
               </div>
-              <h3 className="text-lg font-semibold text-gray-800 mb-2">Delete Department</h3>
+              <h3 className="text-lg font-semibold text-gray-800 mb-2">{t('deleteDepartment')}</h3>
               <p className="text-sm text-gray-600 mb-1">
-                Are you sure you want to delete <span className="font-semibold">"{deleteDeptConfirm.name}"</span>?
+                {t('deleteUserConfirm')} <span className="font-semibold">"{deleteDeptConfirm.name}"</span>?
               </p>
               <p className="text-sm text-red-600 font-medium mb-5">
-                ⚠️ All folders and documents under this department will be permanently deleted.
+                {t('deleteDeptWarning')}
               </p>
               <div className="flex gap-3 w-full">
                 <button
                   onClick={confirmDeleteDepartment}
                   className="flex-1 py-2.5 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 transition-colors">
-                  Delete
+                  {t('delete')}
                 </button>
                 <button
                   onClick={() => setDeleteDeptConfirm(null)}
                   className="flex-1 py-2.5 border border-gray-300 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">
-                  Cancel
+                  {t('cancel')}
                 </button>
               </div>
             </div>
@@ -723,14 +725,14 @@ export function UserManagement() {
                   <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mb-4">
                     <UserCheck className="text-green-600" size={24} />
                   </div>
-                  <h3 className="text-lg font-semibold text-gray-800 mb-2">Password Updated</h3>
+                  <h3 className="text-lg font-semibold text-gray-800 mb-2">{t('passwordUpdated')}</h3>
                   <p className="text-sm text-gray-600 mb-5">
-                    Password for <span className="font-semibold">"{resetPwUser.name}"</span> has been reset successfully.
+                    {t('resetPassword')} <span className="font-semibold">"{resetPwUser.name}"</span> {t('passwordResetSuccess')}
                   </p>
                   <button
                     onClick={() => { setResetPwUser(null); setResetPwStatus('idle'); }}
                     className="w-full py-2.5 bg-[#005F02] text-white text-sm font-medium rounded-lg hover:bg-[#427A43] transition-colors">
-                    Done
+                    {t('done')}
                   </button>
                 </>
               ) : (
@@ -738,9 +740,9 @@ export function UserManagement() {
                   <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center mb-4">
                     <Key className="text-orange-600" size={24} />
                   </div>
-                  <h3 className="text-lg font-semibold text-gray-800 mb-2">Reset Password</h3>
+                  <h3 className="text-lg font-semibold text-gray-800 mb-2">{t('resetPassword')}</h3>
                   <p className="text-sm text-gray-600 mb-4">
-                    Enter a new password for <span className="font-semibold">"{resetPwUser.name}"</span>
+                    {t('enterNewPasswordFor')} <span className="font-semibold">"{resetPwUser.name}"</span>
                   </p>
                   {resetPwError && (
                     <p className="text-sm text-red-600 mb-3">{resetPwError}</p>
@@ -750,7 +752,7 @@ export function UserManagement() {
                       type={resetPwShow ? 'text' : 'password'}
                       value={resetPwValue}
                       onChange={(e) => { setResetPwValue(e.target.value); setResetPwError(''); }}
-                      placeholder="New password (min. 6 characters)"
+                      placeholder={t('newPasswordPlaceholder')}
                       className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#427A43] pr-10"
                     />
                     <button
@@ -765,7 +767,7 @@ export function UserManagement() {
                     <button
                       onClick={async () => {
                         if (resetPwValue.length < 6) {
-                          setResetPwError('Password must be at least 6 characters.');
+                          setResetPwError(t('passwordMinChars'));
                           return;
                         }
                         const success = await resetPassword(resetPwUser.id, resetPwValue);
@@ -782,16 +784,16 @@ export function UserManagement() {
                           });
                           setResetPwStatus('success');
                         } else {
-                          setResetPwError('Failed to reset password. Please try again.');
+                          setResetPwError(t('failedResetPassword'));
                         }
                       }}
                       className="flex-1 py-2.5 bg-[#005F02] text-white text-sm font-medium rounded-lg hover:bg-[#427A43] transition-colors">
-                      Reset Password
+                      {t('resetPassword')}
                     </button>
                     <button
                       onClick={() => { setResetPwUser(null); setResetPwStatus('idle'); }}
                       className="flex-1 py-2.5 border border-gray-300 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">
-                      Cancel
+                      {t('cancel')}
                     </button>
                   </div>
                 </>

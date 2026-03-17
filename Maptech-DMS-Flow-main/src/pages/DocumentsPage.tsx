@@ -28,6 +28,7 @@ import { UploadModal } from '../components/UploadModal';
 import { DeleteFolderModal } from '../components/DeleteFolderModal';
 import FilePreview from '../components/FilePreview';
 import { useNavigation } from '../App';
+import { useLanguage } from '../context/LanguageContext';
 
 // Recursive folder tree item component
 const DT_INDENT = 10;
@@ -164,6 +165,7 @@ export function DocumentsPage() {
     addFolder
   } = useDocuments();
   const { user, users } = useAuth();
+  const { t } = useLanguage();
   const [search, setSearch] = useState('');
   const [filterDept, setFilterDept] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');

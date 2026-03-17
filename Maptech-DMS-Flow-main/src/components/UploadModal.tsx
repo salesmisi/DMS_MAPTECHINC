@@ -448,7 +448,7 @@ export function UploadModal({ onClose, defaultFolderId }: UploadModalProps) {
                   tags: e.target.value
                 }))
                 }
-                placeholder="e.g. financial, quarterly, 2025"
+                placeholder="e.g. financial, quarterly, 2026"
                 className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#427A43]" />
 
             </div>
