@@ -128,6 +128,16 @@ export async function notifyApprovers(documentId: string, documentTitle: string)
     );
 
     for (const approver of approvers.rows) {
+      // Check if user has approvals notifications enabled
+      const prefResult = await pool.query(
+        'SELECT approvals_enabled FROM notification_preferences WHERE user_id = $1',
+        [approver.id]
+      );
+      // Default to true if no preference row exists
+      const approvalsEnabled = prefResult.rows.length === 0 || prefResult.rows[0].approvals_enabled;
+
+      if (!approvalsEnabled) continue;
+
       await pool.query(
         `INSERT INTO notifications (user_id, type, title, message, document_id)
          VALUES ($1, 'approval', $2, $3, $4)`,

@@ -172,7 +172,21 @@ ALTER TABLE documents
 ADD CONSTRAINT IF NOT EXISTS uq_documents_reference UNIQUE (reference);
 
 -- ============================================
--- 8. Document counters (per-department per-year)
+-- 8. NOTIFICATION PREFERENCES
+-- ============================================
+CREATE TABLE IF NOT EXISTS notification_preferences (
+  id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id         UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+  email_enabled   BOOLEAN NOT NULL DEFAULT TRUE,
+  browser_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  approvals_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_notif_prefs_user ON notification_preferences(user_id);
+
+-- ============================================
+-- 9. Document counters (per-department per-year)
 -- ============================================
 CREATE TABLE IF NOT EXISTS document_counters (
   id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -6,14 +6,17 @@ import { Bell, Globe, Shield, Smartphone, Monitor } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useLanguage } from '../context/LanguageContext';
+
+const API_URL = 'http://localhost:5000/api';
+
 export function SettingsPage() {
-  const { changePassword, logout } = useAuth();
+  const { changePassword, logout, token } = useAuth();
   const [notifications, setNotifications] = useState({
     email: true,
     browser: true,
     approvals: true,
-    comments: false
   });
+  const [saving, setSaving] = useState(false);
   const { theme, setTheme } = useTheme();
   const [appearance, setAppearance] = useState({
     theme: theme || 'light',
@@ -57,11 +60,73 @@ export function SettingsPage() {
     setAppearance((prev) => ({ ...prev, theme: theme }));
   }, [theme]);
   const toggleNotification = (key: keyof typeof notifications) => {
+    const newValue = !notifications[key];
+
+    // Request browser notification permission when enabling browser notifications
+    if (key === 'browser' && newValue && 'Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+
     setNotifications((prev) => ({
       ...prev,
-      [key]: !prev[key]
+      [key]: newValue
     }));
   };
+
+  // Fetch notification preferences from backend on mount
+  useEffect(() => {
+    if (!token) return;
+    (async () => {
+      try {
+        const res = await fetch(`${API_URL}/notifications/preferences`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setNotifications({
+            email: data.emailEnabled,
+            browser: data.browserEnabled,
+            approvals: data.approvalsEnabled,
+          });
+        }
+      } catch (err) {
+        console.error('Failed to load notification preferences:', err);
+      }
+    })();
+  }, [token]);
+
+  // Save notification preferences to backend
+  const saveNotificationPreferences = useCallback(async () => {
+    if (!token) return;
+    setSaving(true);
+    try {
+      await fetch(`${API_URL}/notifications/preferences`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          emailEnabled: notifications.email,
+          browserEnabled: notifications.browser,
+          approvalsEnabled: notifications.approvals,
+        }),
+      });
+    } catch (err) {
+      console.error('Failed to save notification preferences:', err);
+    } finally {
+      setSaving(false);
+    }
+  }, [token, notifications]);
+
+  // Auto-save when notification toggles change (debounced)
+  useEffect(() => {
+    if (!token) return;
+    const timer = setTimeout(() => {
+      saveNotificationPreferences();
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [notifications, saveNotificationPreferences]);
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">

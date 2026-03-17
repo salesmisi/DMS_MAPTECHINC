@@ -4,6 +4,7 @@ import React, {
   useContext,
   useEffect,
   useCallback,
+  useRef,
   ReactNode,
 } from 'react';
 import { useAuth } from './AuthContext';
@@ -21,10 +22,17 @@ export interface Notification {
   createdAt: string;
 }
 
+interface NotificationPreferences {
+  emailEnabled: boolean;
+  browserEnabled: boolean;
+  approvalsEnabled: boolean;
+}
+
 interface NotificationContextType {
   notifications: Notification[];
   unreadCount: number;
   loading: boolean;
+  preferences: NotificationPreferences;
   fetchNotifications: () => Promise<void>;
   markAsRead: (id: string) => Promise<void>;
   markAllAsRead: () => Promise<void>;
@@ -51,6 +59,15 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [preferences, setPreferences] = useState<NotificationPreferences>({
+    emailEnabled: true,
+    browserEnabled: true,
+    approvalsEnabled: true,
+  });
+
+  // Track known notification IDs so we only show browser popups for truly new ones
+  const knownIdsRef = useRef<Set<string>>(new Set());
+  const initialFetchDoneRef = useRef(false);
 
   const headers = useCallback(() => {
     return {
@@ -71,6 +88,31 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         const data: Notification[] = await res.json();
         setNotifications(data);
         setUnreadCount(data.filter((n) => !n.isRead).length);
+
+        // Show browser notifications for new unread items (skip on first load)
+        if (initialFetchDoneRef.current && preferences.browserEnabled) {
+          const newUnread = data.filter(
+            (n) => !n.isRead && !knownIdsRef.current.has(n.id)
+          );
+          if (
+            newUnread.length > 0 &&
+            'Notification' in window &&
+            Notification.permission === 'granted'
+          ) {
+            for (const n of newUnread) {
+              new window.Notification(n.title, {
+                body: n.message,
+                icon: '/favicon.ico',
+                tag: n.id,
+              });
+            }
+          }
+        }
+
+        // Update known IDs
+        knownIdsRef.current = new Set(data.map((n) => n.id));
+        initialFetchDoneRef.current = true;
+
         // If there's a new assignment notification, trigger folders refresh
         const hasAssignment = data.some((n) => !n.isRead && (n.type === 'assignment' || /assigned to department/i.test(n.title)));
         if (hasAssignment) {
@@ -88,7 +130,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false);
     }
-  }, [token, headers]);
+  }, [token, headers, preferences.browserEnabled]);
 
   // Mark a single notification as read — immediate UI update
   const markAsRead = useCallback(
@@ -174,15 +216,38 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     [headers, fetchNotifications]
   );
 
+  // Fetch notification preferences
+  const fetchPreferences = useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_URL}/notifications/preferences`, {
+        headers: headers(),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPreferences({
+          emailEnabled: data.emailEnabled,
+          browserEnabled: data.browserEnabled,
+          approvalsEnabled: data.approvalsEnabled,
+        });
+      }
+    } catch (err) {
+      console.error('fetchPreferences error:', err);
+    }
+  }, [token, headers]);
+
   // Auto-fetch when user logs in
   useEffect(() => {
     if (token && user) {
       fetchNotifications();
+      fetchPreferences();
     } else {
       setNotifications([]);
       setUnreadCount(0);
+      knownIdsRef.current = new Set();
+      initialFetchDoneRef.current = false;
     }
-  }, [token, user, fetchNotifications]);
+  }, [token, user, fetchNotifications, fetchPreferences]);
 
   // Poll every 30 seconds for new notifications
   useEffect(() => {
@@ -197,6 +262,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         notifications,
         unreadCount,
         loading,
+        preferences,
         fetchNotifications,
         markAsRead,
         markAllAsRead,
