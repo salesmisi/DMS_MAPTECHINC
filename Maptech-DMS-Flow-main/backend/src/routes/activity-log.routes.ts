@@ -10,6 +10,9 @@ router.use(authenticate);
 // GET /api/activity-logs - Get all activity logs (admin only, but we'll allow all authenticated users to write)
 router.get('/', activityLogController.getActivityLogs);
 
+// GET /api/activity-logs/download - Download activity logs as Excel
+router.get('/download', activityLogController.downloadActivityLogs);
+
 // POST /api/activity-logs - Create a new activity log
 router.post('/', activityLogController.createActivityLog);
 

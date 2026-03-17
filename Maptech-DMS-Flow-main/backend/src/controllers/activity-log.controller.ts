@@ -1,6 +1,8 @@
 import type { Response } from 'express';
 import type { AuthRequest } from '../middleware/auth.middleware';
 import pool from '../db';
+import path from 'path';
+import ExcelJS from 'exceljs';
 
 // Get all activity logs (admin only)
 export const getActivityLogs = async (req: AuthRequest, res: Response) => {
@@ -87,4 +89,116 @@ export const createActivityLog = async (req: AuthRequest, res: Response) => {
   }
 };
 
-export default { getActivityLogs, createActivityLog };
+// Download activity logs as Excel using template
+export const downloadActivityLogs = async (req: AuthRequest, res: Response) => {
+  try {
+    const result = await pool.query(
+      `SELECT created_at, user_name, action, target, ip_address, details
+       FROM activity_logs
+       ORDER BY created_at DESC`
+    );
+
+    const templatePath = path.join(__dirname, '..', '..', '..', 'template', 'activity_log_template.xlsx');
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(templatePath);
+
+    const worksheet = workbook.worksheets[0];
+    if (!worksheet) {
+      return res.status(500).json({ error: 'Template worksheet not found' });
+    }
+
+    // Template layout (merged columns):
+    //   A & Z  = decorative sidebar
+    //   B:E    = TIMESTAMP (merged)
+    //   F:I    = USER      (merged)
+    //   J:M    = ACTION    (merged)
+    //   N:Q    = TARGET    (merged)
+    //   R:U    = IP ADDRESS (no data-row merge in template)
+    //   V:Y    = DETAILS   (merged)
+    // Rows 1-3 = title, Rows 4-5 = headers, Row 6+ = data
+
+    const DATA_START_ROW = 6;
+
+    // Column start positions for each field (first col of each merged group)
+    const COL_TIMESTAMP = 2;   // B
+    const COL_USER = 6;        // F
+    const COL_ACTION = 10;     // J
+    const COL_TARGET = 14;     // N
+    const COL_IP = 18;         // R
+    const COL_DETAILS = 22;    // V
+
+    // Capture the template style from the first data row before overwriting
+    const templateRow = worksheet.getRow(DATA_START_ROW);
+    const templateStyles: Record<number, ExcelJS.Style> = {};
+    for (let c = 1; c <= 26; c++) {
+      const cell = templateRow.getCell(c);
+      templateStyles[c] = {
+        font: cell.font ? { ...cell.font } : {},
+        fill: cell.fill ? { ...cell.fill } : {},
+        alignment: cell.alignment ? { ...cell.alignment } : {},
+        border: cell.border ? { ...cell.border } : {},
+        numFmt: cell.numFmt || '',
+        protection: cell.protection ? { ...cell.protection } : {},
+      } as ExcelJS.Style;
+    }
+
+    // Pre-defined merges exist for rows 6-102 (97 rows) in the template.
+    // For rows beyond that, we need to add merges dynamically.
+    const TEMPLATE_LAST_ROW = 102;
+
+    result.rows.forEach((log, index) => {
+      const rowNum = DATA_START_ROW + index;
+      const row = worksheet.getRow(rowNum);
+
+      const timestamp = log.created_at
+        ? new Date(log.created_at).toLocaleString('en-US', { timeZone: 'Asia/Manila' })
+        : '';
+
+      // Write values into the first cell of each merged group
+      row.getCell(COL_TIMESTAMP).value = timestamp;
+      row.getCell(COL_USER).value = log.user_name || '';
+      row.getCell(COL_ACTION).value = log.action || '';
+      row.getCell(COL_TARGET).value = log.target || '';
+      row.getCell(COL_IP).value = log.ip_address || '';
+      row.getCell(COL_DETAILS).value = log.details || '';
+
+      // Apply template styles to all 26 columns of the row
+      for (let c = 1; c <= 26; c++) {
+        const cell = row.getCell(c);
+        const style = templateStyles[c];
+        if (style) {
+          cell.font = { ...style.font };
+          cell.fill = { ...style.fill } as ExcelJS.Fill;
+          cell.alignment = { ...style.alignment };
+          cell.border = { ...style.border };
+        }
+      }
+
+      // Add merges for rows beyond the template's pre-defined range
+      if (rowNum > TEMPLATE_LAST_ROW) {
+        worksheet.mergeCells(`B${rowNum}:E${rowNum}`);
+        worksheet.mergeCells(`F${rowNum}:I${rowNum}`);
+        worksheet.mergeCells(`J${rowNum}:M${rowNum}`);
+        worksheet.mergeCells(`N${rowNum}:Q${rowNum}`);
+        worksheet.mergeCells(`R${rowNum}:U${rowNum}`);
+        worksheet.mergeCells(`V${rowNum}:Y${rowNum}`);
+      }
+
+      row.commit();
+    });
+
+    const filename = `Activity_Logs_${new Date().toISOString().slice(0, 10)}.xlsx`;
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Server error';
+    console.error('downloadActivityLogs error:', message);
+    return res.status(500).json({ error: message });
+  }
+};
+
+export default { getActivityLogs, createActivityLog, downloadActivityLogs };
