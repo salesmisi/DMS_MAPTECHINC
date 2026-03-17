@@ -71,6 +71,22 @@ async function runMigrations() {
     } catch (e) {
       // ignore
     }
+    // Create activity_logs_archive table if missing
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS activity_logs_archive (
+        id          UUID PRIMARY KEY,
+        user_id     UUID NOT NULL,
+        user_name   VARCHAR(150) NOT NULL,
+        user_role   VARCHAR(20) NOT NULL,
+        action      VARCHAR(100) NOT NULL,
+        target      VARCHAR(255) NOT NULL,
+        target_type VARCHAR(20) NOT NULL,
+        ip_address  VARCHAR(45),
+        details     TEXT,
+        created_at  TIMESTAMPTZ NOT NULL,
+        archived_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
     console.log('Migrations applied successfully');
   } catch (e: any) {
     console.warn('Migration warning:', e?.message || e);

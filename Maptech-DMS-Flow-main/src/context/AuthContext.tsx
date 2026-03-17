@@ -28,7 +28,7 @@ interface AuthContextType {
   updateUser: (id: string, updates: Partial<User>) => Promise<void>;
   updateProfile: (updates: Partial<User>) => void;
   deleteUser: (id: string) => Promise<void>;
-  resetPassword: (id: string, newPassword: string) => Promise<void>;
+  resetPassword: (id: string, newPassword: string) => Promise<boolean>;
   changePassword: (currentPassword: string, newPassword: string) => Promise<boolean>;
   fetchUsers: () => Promise<void>;
 }
@@ -267,13 +267,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
 
       if (res.ok) {
-        alert('Password updated successfully');
+        return true;
       } else {
-        const err = await res.json();
-        alert(err.error || 'Failed to reset password');
+        return false;
       }
     } catch (err) {
       console.error('resetPassword error:', err);
+      return false;
     }
   };
 

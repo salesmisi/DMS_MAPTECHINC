@@ -140,7 +140,12 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
               ) : (
                 notifications.map((n) => {
                   let icon, iconBg, label, onClick;
-                  if (n.type === 'delete-request') {
+                  if (n.type === 'activity-log-export') {
+                    icon = <FileText size={14} className="text-orange-600" />;
+                    iconBg = 'bg-orange-100';
+                    label = 'Activity Log Export';
+                    onClick = () => { navigate('activity-log'); setShowNotifications(false); };
+                  } else if (n.type === 'delete-request') {
                     icon = <FileText size={14} className="text-red-600" />;
                     iconBg = 'bg-red-100';
                     label = 'Delete Request';

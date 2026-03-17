@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { formatDate } from '../utils/locale';
-import { Activity, Download, Search, Filter, Clock } from 'lucide-react';
+import { Activity, Download, Search, Filter, Clock, FileSpreadsheet, FileText, ChevronDown } from 'lucide-react';
 import { useDocuments } from '../context/DocumentContext';
 import { AutocompleteSearch } from '../components/AutocompleteSearch';
 export function ActivityLog() {
@@ -8,6 +8,40 @@ export function ActivityLog() {
   const [search, setSearch] = useState('');
   const [filterAction, setFilterAction] = useState('all');
   const [filterRole, setFilterRole] = useState('all');
+  const [exportOpen, setExportOpen] = useState(false);
+  const exportRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (exportRef.current && !exportRef.current.contains(e.target as Node)) {
+        setExportOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
+  const handleExport = async (format: 'excel' | 'pdf') => {
+    setExportOpen(false);
+    try {
+      const token = localStorage.getItem('dms_token');
+      const endpoint = format === 'pdf' ? 'download-pdf' : 'download';
+      const res = await fetch(`http://localhost:5000/api/activity-logs/${endpoint}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Download failed');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const ext = format === 'pdf' ? 'pdf' : 'xlsx';
+      a.download = `Activity_Logs_${new Date().toISOString().split('T')[0]}.${ext}`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Export failed:', err);
+    }
+  };
   const filtered = activityLogs.filter((log) => {
     const matchSearch =
     !search ||
@@ -103,30 +137,31 @@ export function ActivityLog() {
             Complete audit trail — {activityLogs.length} entries
           </p>
         </div>
-        <button
-          onClick={async () => {
-            try {
-              const token = localStorage.getItem('dms_token');
-              const res = await fetch('http://localhost:5000/api/activity-logs/download', {
-                headers: { Authorization: `Bearer ${token}` },
-              });
-              if (!res.ok) throw new Error('Download failed');
-              const blob = await res.blob();
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement('a');
-              a.href = url;
-              a.download = `Activity_Logs_${new Date().toISOString().split('T')[0]}.xlsx`;
-              a.click();
-              URL.revokeObjectURL(url);
-            } catch (err) {
-              console.error('Export failed:', err);
-            }
-          }}
-          className="flex items-center gap-2 px-4 py-2 bg-[#C0B87A] text-[#005F02] text-sm font-semibold rounded-xl hover:bg-[#F2E3BB] transition-colors">
-
-          <Download size={16} />
-          Export Excel
-        </button>
+        <div className="relative" ref={exportRef}>
+          <button
+            onClick={() => setExportOpen(!exportOpen)}
+            className="flex items-center gap-2 px-4 py-2 bg-[#C0B87A] text-[#005F02] text-sm font-semibold rounded-xl hover:bg-[#F2E3BB] transition-colors">
+            <Download size={16} />
+            Export
+            <ChevronDown size={14} />
+          </button>
+          {exportOpen && (
+            <div className="absolute right-0 mt-2 w-44 bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden z-50">
+              <button
+                onClick={() => handleExport('excel')}
+                className="w-full flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-green-50 transition-colors">
+                <FileSpreadsheet size={16} className="text-green-600" />
+                Export as Excel
+              </button>
+              <button
+                onClick={() => handleExport('pdf')}
+                className="w-full flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-red-50 transition-colors border-t border-gray-50">
+                <FileText size={16} className="text-red-500" />
+                Export as PDF
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Filters */}

@@ -1,7 +1,7 @@
-import React, { useState, createContext, useContext } from 'react';
+import React, { useState, useEffect, useCallback, createContext, useContext } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { DocumentProvider } from './context/DocumentContext';
-import { NotificationProvider } from './context/NotificationContext';
+import { NotificationProvider, useNotifications } from './context/NotificationContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { LanguageProvider } from './context/LanguageContext';
 import { LoginPage } from './pages/LoginPage';
@@ -21,6 +21,7 @@ import { ProfilePage } from './pages/ProfilePage';
 import { SettingsPage } from './pages/SettingsPage';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
+import { ActivityLogExportPopup } from './components/ActivityLogExportPopup';
 export type PageName =
   'dashboard' |
   'documents' |
@@ -52,11 +53,40 @@ export function useNavigation() {
 }
 function AppContent() {
   const { user } = useAuth();
+  const { createNotification } = useNotifications();
   const [currentPage, setCurrentPage] = useState<PageName>('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
+  const [logCount, setLogCount] = useState(0);
+  const [showExportPopup, setShowExportPopup] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
   const navigate = (page: PageName) => setCurrentPage(page);
   const selectFolder = (id: string | null) => setSelectedFolderId(id);
+
+  const checkLogCount = useCallback(async () => {
+    try {
+      const token = localStorage.getItem('dms_token');
+      if (!token) return;
+      const res = await fetch('http://localhost:5000/api/activity-logs/count', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      setLogCount(data.count);
+      if (data.count >= 100 && !dismissed) {
+        setShowExportPopup(true);
+      }
+    } catch {
+      // silently ignore polling errors
+    }
+  }, [dismissed]);
+
+  useEffect(() => {
+    if (!user) return;
+    checkLogCount();
+    const interval = setInterval(checkLogCount, 30000);
+    return () => clearInterval(interval);
+  }, [user, checkLogCount]);
   if (!user) {
     return <LoginPage />;
   }
@@ -118,6 +148,29 @@ function AppContent() {
           <main className="flex-1 overflow-y-auto p-6 dark:bg-[#121212]">{renderPage()}</main>
         </div>
       </div>
+      {showExportPopup && (
+        <ActivityLogExportPopup
+          count={logCount}
+          onDismiss={() => {
+            setShowExportPopup(false);
+            setDismissed(true);
+            if (user) {
+              createNotification({
+                userId: user.id,
+                type: 'activity-log-export',
+                title: 'Activity Log Export Required',
+                message: `Activity logs reached ${logCount} records. Please download the report from the Activity Log page.`,
+              });
+            }
+          }}
+          onExported={() => {
+            setShowExportPopup(false);
+            setDismissed(false);
+            setLogCount(0);
+            checkLogCount();
+          }}
+        />
+      )}
     </NavigationContext.Provider>);
 
 }

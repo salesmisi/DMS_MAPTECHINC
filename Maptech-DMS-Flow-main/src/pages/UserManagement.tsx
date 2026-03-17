@@ -26,7 +26,7 @@ interface Department {
 }
 
 export function UserManagement() {
-  const { user: currentUser, users, addUser, updateUser, deleteUser } = useAuth();
+  const { user: currentUser, users, addUser, updateUser, deleteUser, resetPassword } = useAuth();
   const { addLog } = useDocuments();
   const [search, setSearch] = useState('');
   const [showAddUser, setShowAddUser] = useState(false);
@@ -50,6 +50,11 @@ export function UserManagement() {
   const [showPassword, setShowPassword] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; name: string } | null>(null);
   const [deleteDeptConfirm, setDeleteDeptConfirm] = useState<{ id: string; name: string } | null>(null);
+  const [resetPwUser, setResetPwUser] = useState<{ id: string; name: string } | null>(null);
+  const [resetPwValue, setResetPwValue] = useState('');
+  const [resetPwShow, setResetPwShow] = useState(false);
+  const [resetPwStatus, setResetPwStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [resetPwError, setResetPwError] = useState('');
 
   // Fetch departments from API on mount
   const fetchDepartments = async () => {
@@ -376,6 +381,12 @@ export function UserManagement() {
                       <UserCheck size={15} />
                       }
                         </button>
+                        <button
+                      onClick={() => { setResetPwUser({ id: u.id, name: u.name }); setResetPwValue(''); setResetPwShow(false); setResetPwStatus('idle'); setResetPwError(''); }}
+                      className="p-1.5 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded transition-colors"
+                      title="Reset Password">
+                          <Key size={15} />
+                        </button>
                         {u.id !== 'user-1' &&
                     <button
                       onClick={() => handleDeleteUser(u.id, u.name)}
@@ -698,6 +709,93 @@ export function UserManagement() {
                   Cancel
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Reset Password Modal */}
+      {resetPwUser && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+            <div className="flex flex-col items-center text-center">
+              {resetPwStatus === 'success' ? (
+                <>
+                  <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mb-4">
+                    <UserCheck className="text-green-600" size={24} />
+                  </div>
+                  <h3 className="text-lg font-semibold text-gray-800 mb-2">Password Updated</h3>
+                  <p className="text-sm text-gray-600 mb-5">
+                    Password for <span className="font-semibold">"{resetPwUser.name}"</span> has been reset successfully.
+                  </p>
+                  <button
+                    onClick={() => { setResetPwUser(null); setResetPwStatus('idle'); }}
+                    className="w-full py-2.5 bg-[#005F02] text-white text-sm font-medium rounded-lg hover:bg-[#427A43] transition-colors">
+                    Done
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center mb-4">
+                    <Key className="text-orange-600" size={24} />
+                  </div>
+                  <h3 className="text-lg font-semibold text-gray-800 mb-2">Reset Password</h3>
+                  <p className="text-sm text-gray-600 mb-4">
+                    Enter a new password for <span className="font-semibold">"{resetPwUser.name}"</span>
+                  </p>
+                  {resetPwError && (
+                    <p className="text-sm text-red-600 mb-3">{resetPwError}</p>
+                  )}
+                  <div className="w-full relative mb-5">
+                    <input
+                      type={resetPwShow ? 'text' : 'password'}
+                      value={resetPwValue}
+                      onChange={(e) => { setResetPwValue(e.target.value); setResetPwError(''); }}
+                      placeholder="New password (min. 6 characters)"
+                      className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#427A43] pr-10"
+                    />
+                    <button
+                      type="button"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700"
+                      onClick={() => setResetPwShow((v) => !v)}
+                    >
+                      {resetPwShow ? <EyeOff size={18} /> : <Eye size={15} />}
+                    </button>
+                  </div>
+                  <div className="flex gap-3 w-full">
+                    <button
+                      onClick={async () => {
+                        if (resetPwValue.length < 6) {
+                          setResetPwError('Password must be at least 6 characters.');
+                          return;
+                        }
+                        const success = await resetPassword(resetPwUser.id, resetPwValue);
+                        if (success) {
+                          addLog({
+                            userId: currentUser?.id || '',
+                            userName: currentUser?.name || '',
+                            userRole: currentUser?.role || 'admin',
+                            action: 'RESET_PASSWORD',                            target: resetPwUser.name,
+                            targetType: 'user',
+                            timestamp: new Date().toISOString(),
+                            ipAddress: '192.168.1.100',
+                            details: `Password reset for ${resetPwUser.name}`,
+                          });
+                          setResetPwStatus('success');
+                        } else {
+                          setResetPwError('Failed to reset password. Please try again.');
+                        }
+                      }}
+                      className="flex-1 py-2.5 bg-[#005F02] text-white text-sm font-medium rounded-lg hover:bg-[#427A43] transition-colors">
+                      Reset Password
+                    </button>
+                    <button
+                      onClick={() => { setResetPwUser(null); setResetPwStatus('idle'); }}
+                      className="flex-1 py-2.5 border border-gray-300 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">
+                      Cancel
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>

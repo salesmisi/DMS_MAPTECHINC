@@ -3,6 +3,7 @@ import type { AuthRequest } from '../middleware/auth.middleware';
 import pool from '../db';
 import path from 'path';
 import ExcelJS from 'exceljs';
+import PDFDocument from 'pdfkit';
 
 // Get all activity logs (admin only)
 export const getActivityLogs = async (req: AuthRequest, res: Response) => {
@@ -201,4 +202,164 @@ export const downloadActivityLogs = async (req: AuthRequest, res: Response) => {
   }
 };
 
-export default { getActivityLogs, createActivityLog, downloadActivityLogs };
+// Download activity logs as PDF
+export const downloadActivityLogsPdf = async (req: AuthRequest, res: Response) => {
+  try {
+    const result = await pool.query(
+      `SELECT created_at, user_name, action, target, ip_address, details
+       FROM activity_logs
+       ORDER BY created_at DESC`
+    );
+
+    const filename = `Activity_Logs_${new Date().toISOString().slice(0, 10)}.pdf`;
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+    const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 30 });
+    doc.pipe(res);
+
+    const darkGreen = '#005F02';
+    const gold = '#C0B87A';
+    const lightGreen = '#E8F5E9';
+    const white = '#FFFFFF';
+
+    // Title bar
+    doc.rect(30, 30, doc.page.width - 60, 40).fill(darkGreen);
+    doc.fontSize(14).fill(white).text(
+      'MAPTECH DOCUMENT MANAGEMENT SYSTEM - ACTIVITY LOGS',
+      30, 42, { align: 'center', width: doc.page.width - 60 }
+    );
+
+    // Table config
+    const colWidths = [120, 100, 110, 130, 95, 195];
+    const headers = ['TIMESTAMP', 'USER', 'ACTION', 'TARGET', 'IP ADDRESS', 'DETAILS'];
+    const tableLeft = 30;
+    let y = 80;
+    const rowHeight = 22;
+    const headerHeight = 26;
+
+    // Header row
+    let x = tableLeft;
+    headers.forEach((header, i) => {
+      doc.rect(x, y, colWidths[i], headerHeight).fill(gold);
+      doc.fontSize(8).fill(darkGreen).text(
+        header, x + 4, y + 8,
+        { width: colWidths[i] - 8, align: 'center' }
+      );
+      x += colWidths[i];
+    });
+    y += headerHeight;
+
+    // Data rows
+    const pageBottom = doc.page.height - 50;
+
+    result.rows.forEach((log, index) => {
+      if (y + rowHeight > pageBottom) {
+        doc.addPage({ size: 'A4', layout: 'landscape', margin: 30 });
+        y = 30;
+
+        // Repeat header on new page
+        x = tableLeft;
+        headers.forEach((header, i) => {
+          doc.rect(x, y, colWidths[i], headerHeight).fill(gold);
+          doc.fontSize(8).fill(darkGreen).text(
+            header, x + 4, y + 8,
+            { width: colWidths[i] - 8, align: 'center' }
+          );
+          x += colWidths[i];
+        });
+        y += headerHeight;
+      }
+
+      const bgColor = index % 2 === 0 ? lightGreen : white;
+      const timestamp = log.created_at
+        ? new Date(log.created_at).toLocaleString('en-US', { timeZone: 'Asia/Manila' })
+        : '';
+
+      const rowData = [
+        timestamp,
+        log.user_name || '',
+        log.action || '',
+        log.target || '',
+        log.ip_address || '',
+        log.details || '',
+      ];
+
+      x = tableLeft;
+      rowData.forEach((text, i) => {
+        doc.rect(x, y, colWidths[i], rowHeight).fill(bgColor);
+        doc.rect(x, y, colWidths[i], rowHeight).stroke('#CCCCCC');
+        doc.fontSize(7).fill('#333333').text(
+          String(text), x + 4, y + 6,
+          { width: colWidths[i] - 8, lineBreak: false }
+        );
+        x += colWidths[i];
+      });
+
+      y += rowHeight;
+    });
+
+    doc.end();
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Server error';
+    console.error('downloadActivityLogsPdf error:', message);
+    return res.status(500).json({ error: message });
+  }
+};
+
+// Get activity log count
+export const getActivityLogCount = async (req: AuthRequest, res: Response) => {
+  try {
+    const result = await pool.query('SELECT COUNT(*)::int AS count FROM activity_logs');
+    return res.json({ count: result.rows[0].count });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Server error';
+    console.error('getActivityLogCount error:', message);
+    return res.status(500).json({ error: message });
+  }
+};
+
+// Archive activity logs (move to activity_logs_archive and clear)
+export const downloadAndArchiveActivityLogs = async (req: AuthRequest, res: Response) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const countResult = await client.query('SELECT COUNT(*)::int AS count FROM activity_logs');
+    if (countResult.rows[0].count === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'No activity logs to archive' });
+    }
+
+    // Move logs to archive table
+    await client.query(
+      `INSERT INTO activity_logs_archive (id, user_id, user_name, user_role, action, target, target_type, ip_address, details, created_at)
+       SELECT id, user_id, user_name, user_role, action, target, target_type, ip_address, details, created_at
+       FROM activity_logs`
+    );
+
+    // Clear the activity_logs table
+    await client.query('DELETE FROM activity_logs');
+
+    await client.query('COMMIT');
+
+    return res.json({ success: true, archived: countResult.rows[0].count });
+  } catch (err: unknown) {
+    await client.query('ROLLBACK').catch(() => {});
+    const message = err instanceof Error ? err.message : 'Server error';
+    console.error('downloadAndArchiveActivityLogs error:', message);
+    return res.status(500).json({ error: message });
+  } finally {
+    client.release();
+  }
+};
+
+export default {
+  getActivityLogs,
+  createActivityLog,
+  downloadActivityLogs,
+  downloadActivityLogsPdf,
+  getActivityLogCount,
+  downloadAndArchiveActivityLogs,
+};
