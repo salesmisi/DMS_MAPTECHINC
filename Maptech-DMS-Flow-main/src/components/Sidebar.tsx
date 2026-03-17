@@ -89,6 +89,16 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
     }
   ] :
   []),
+  ...(user?.role === 'manager' ?
+  [
+    {
+      id: 'admin-delete-requests' as PageName,
+      label: t('deleteRequests'),
+      icon: <Trash2 size={18} />,
+      roles: ['manager']
+    }
+  ] :
+  []),
   {
     id: 'archive',
     label: t('archives'),

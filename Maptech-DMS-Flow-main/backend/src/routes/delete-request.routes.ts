@@ -12,13 +12,13 @@ const router = Router();
 // Staff: Request deletion
 router.post('/', authenticate, requestDelete);
 
-// Admin: List all pending delete requests
-router.get('/', authenticate, requireRole(['admin']), listDeleteRequests);
+// Admin/Manager: List all pending delete requests
+router.get('/', authenticate, requireRole(['admin', 'manager']), listDeleteRequests);
 
-// Admin: Approve a delete request
-router.put('/:id/approve', authenticate, requireRole(['admin']), approveDeleteRequest);
+// Admin/Manager: Approve a delete request
+router.put('/:id/approve', authenticate, requireRole(['admin', 'manager']), approveDeleteRequest);
 
-// Admin: Deny a delete request
-router.put('/:id/deny', authenticate, requireRole(['admin']), denyDeleteRequest);
+// Admin/Manager: Deny a delete request
+router.put('/:id/deny', authenticate, requireRole(['admin', 'manager']), denyDeleteRequest);
 
 export default router;

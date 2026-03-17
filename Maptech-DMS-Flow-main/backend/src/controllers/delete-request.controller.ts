@@ -27,13 +27,13 @@ export const requestDelete = async (req: AuthRequest, res: Response) => {
        VALUES ($1, $2, $3, $4, $5) RETURNING *`,
       [type, target_id, userId, department || null, reason || null]
     );
-    // Notify all admins
-    const admins = await pool.query("SELECT id FROM users WHERE role = 'admin' AND status = 'active'");
-    for (const admin of admins.rows) {
+    // Notify all admins and managers
+    const reviewers = await pool.query("SELECT id FROM users WHERE role IN ('admin', 'manager') AND status = 'active'");
+    for (const reviewer of reviewers.rows) {
       await pool.query(
         `INSERT INTO notifications (user_id, type, title, message)
          VALUES ($1, 'delete-request', $2, $3)`,
-        [admin.id, `Delete Request: ${type}`, `A staff member requested to delete a ${type}. Please review the request.`]
+        [reviewer.id, `Delete Request: ${type}`, `A staff member requested to delete a ${type}. Please review the request.`]
       );
     }
     return res.status(201).json(result.rows[0]);
@@ -83,7 +83,7 @@ export const approveDeleteRequest = async (req: AuthRequest, res: Response) => {
     await pool.query(
       `INSERT INTO notifications (user_id, type, title, message)
        VALUES ($1, 'delete-approved', $2, $3)`,
-      [request.requested_by, `Delete Approved: ${request.type}`, `Your request to delete the ${request.type} has been approved and processed by admin.`]
+      [request.requested_by, `Delete Approved: ${request.type}`, `Your request to delete the ${request.type} has been approved and processed.`]
     );
 
     // Perform the actual deletion based on type
@@ -130,7 +130,7 @@ export const denyDeleteRequest = async (req: AuthRequest, res: Response) => {
     await pool.query(
       `INSERT INTO notifications (user_id, type, title, message)
        VALUES ($1, 'delete-denied', $2, $3)`,
-      [deniedRequest.requested_by, `Delete Denied: ${deniedRequest.type}`, `Your request to delete the ${deniedRequest.type} was denied by admin.`]
+      [deniedRequest.requested_by, `Delete Denied: ${deniedRequest.type}`, `Your request to delete the ${deniedRequest.type} was denied.`]
     );
     return res.json(deniedRequest);
   } catch (err) {

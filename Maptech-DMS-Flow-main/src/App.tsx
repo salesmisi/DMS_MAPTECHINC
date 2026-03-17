@@ -113,7 +113,7 @@ function AppContent() {
       case 'activity-log':
         return user.role === 'admin' ? <ActivityLog /> : <StaffDashboard />;
       case 'admin-delete-requests':
-        return user.role === 'admin' ? <AdminDeleteRequests /> : <StaffDashboard />;
+        return (user.role === 'admin' || user.role === 'manager') ? <AdminDeleteRequests /> : <StaffDashboard />;
       case 'profile':
         return <ProfilePage />;
       case 'settings':
