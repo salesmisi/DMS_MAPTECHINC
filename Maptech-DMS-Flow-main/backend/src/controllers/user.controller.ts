@@ -7,6 +7,37 @@ import pool from '../db';
 const JWT_SECRET = process.env.JWT_SECRET || 'change_me_to_a_strong_random_string';
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 
+// Password validation rules
+const PASSWORD_RULES = {
+  minLength: 8,
+  hasUppercase: /[A-Z]/,
+  hasLowercase: /[a-z]/,
+  hasNumber: /[0-9]/,
+  hasSpecial: /[!@#$%^&*(),.?":{}|<>_\-+=\[\]\\\/`~;']/,
+};
+
+function validatePassword(password: string): { isValid: boolean; errors: string[] } {
+  const errors: string[] = [];
+
+  if (password.length < PASSWORD_RULES.minLength) {
+    errors.push('Password must be at least 8 characters');
+  }
+  if (!PASSWORD_RULES.hasUppercase.test(password)) {
+    errors.push('Password must contain at least one uppercase letter');
+  }
+  if (!PASSWORD_RULES.hasLowercase.test(password)) {
+    errors.push('Password must contain at least one lowercase letter');
+  }
+  if (!PASSWORD_RULES.hasNumber.test(password)) {
+    errors.push('Password must contain at least one number');
+  }
+  if (!PASSWORD_RULES.hasSpecial.test(password)) {
+    errors.push('Password must contain at least one special character');
+  }
+
+  return { isValid: errors.length === 0, errors };
+}
+
 // ── helpers ──────────────────────────────────────────────
 function signToken(userId: string, role: string) {
   return jwt.sign({ id: userId, role }, JWT_SECRET, {
@@ -110,6 +141,12 @@ export const createUser = async (req: Request, res: Response) => {
 
     if (!email.endsWith('@maptech.com')) {
       return res.status(400).json({ error: 'Email address must end with @maptech.com' });
+    }
+
+    // Validate password security rules
+    const passwordValidation = validatePassword(password);
+    if (!passwordValidation.isValid) {
+      return res.status(400).json({ error: passwordValidation.errors[0] });
     }
 
     // check duplicate
@@ -250,8 +287,14 @@ export const resetPassword = async (req: Request, res: Response) => {
     const { id } = req.params;
     const { newPassword } = req.body;
 
-    if (!newPassword || newPassword.length < 6)
-      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    if (!newPassword)
+      return res.status(400).json({ error: 'New password is required' });
+
+    // Validate password security rules
+    const passwordValidation = validatePassword(newPassword);
+    if (!passwordValidation.isValid) {
+      return res.status(400).json({ error: passwordValidation.errors[0] });
+    }
 
     const hashed = await bcrypt.hash(newPassword, 10);
     const result = await pool.query(
@@ -277,8 +320,11 @@ export const changePassword = async (req: AuthRequest, res: Response) => {
     if (!currentPassword || !newPassword)
       return res.status(400).json({ error: 'currentPassword and newPassword are required' });
 
-    if (newPassword.length < 6)
-      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    // Validate password security rules
+    const passwordValidation = validatePassword(newPassword);
+    if (!passwordValidation.isValid) {
+      return res.status(400).json({ error: passwordValidation.errors[0] });
+    }
 
     // Only allow users to change their own password (admins can use resetPassword)
     if (!req.userId || req.userId !== id) return res.status(403).json({ error: 'Forbidden' });

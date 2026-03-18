@@ -1,13 +1,48 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Badge } from '../components/ui/Badge';
-import { User, Mail, Building, Shield, Camera, Save, Lock } from 'lucide-react';
+import { User, Mail, Building, Shield, Camera, Save, Lock, CheckCircle, XCircle } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 
 const API_URL = 'http://localhost:5000/api';
+
+// Password validation rules
+const PASSWORD_RULES = {
+  minLength: 8,
+  hasUppercase: /[A-Z]/,
+  hasLowercase: /[a-z]/,
+  hasNumber: /[0-9]/,
+  hasSpecial: /[!@#$%^&*(),.?":{}|<>_\-+=\[\]\\\/`~;']/,
+};
+
+interface PasswordValidation {
+  minLength: boolean;
+  hasUppercase: boolean;
+  hasLowercase: boolean;
+  hasNumber: boolean;
+  hasSpecial: boolean;
+  isValid: boolean;
+}
+
+const validatePassword = (password: string): PasswordValidation => {
+  const minLength = password.length >= PASSWORD_RULES.minLength;
+  const hasUppercase = PASSWORD_RULES.hasUppercase.test(password);
+  const hasLowercase = PASSWORD_RULES.hasLowercase.test(password);
+  const hasNumber = PASSWORD_RULES.hasNumber.test(password);
+  const hasSpecial = PASSWORD_RULES.hasSpecial.test(password);
+
+  return {
+    minLength,
+    hasUppercase,
+    hasLowercase,
+    hasNumber,
+    hasSpecial,
+    isValid: minLength && hasUppercase && hasLowercase && hasNumber && hasSpecial,
+  };
+};
 
 export function ProfilePage() {
   const { user, updateProfile, changePassword, logout, refreshCurrentUser } = useAuth();
@@ -88,8 +123,9 @@ export function ProfilePage() {
       setPasswordMsgType('error');
       return;
     }
-    if (formData.newPassword.length < 6) {
-      setPasswordMessage('New password must be at least 6 characters');
+    const passwordValidation = validatePassword(formData.newPassword);
+    if (!passwordValidation.isValid) {
+      setPasswordMessage('Password does not meet security requirements');
       setPasswordMsgType('error');
       return;
     }
@@ -305,6 +341,41 @@ export function ProfilePage() {
                   onChange={handleChange} />
 
               </div>
+              {/* Password Rules Checklist */}
+              {formData.newPassword.length > 0 && (
+                <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
+                  <p className="text-xs font-medium text-gray-600 mb-2">Password Requirements:</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5">
+                    {(() => {
+                      const validation = validatePassword(formData.newPassword);
+                      return (
+                        <>
+                          <div className={`flex items-center gap-2 text-xs ${validation.minLength ? 'text-green-600' : 'text-gray-500'}`}>
+                            {validation.minLength ? <CheckCircle size={14} /> : <XCircle size={14} />}
+                            <span>At least 8 characters</span>
+                          </div>
+                          <div className={`flex items-center gap-2 text-xs ${validation.hasUppercase ? 'text-green-600' : 'text-gray-500'}`}>
+                            {validation.hasUppercase ? <CheckCircle size={14} /> : <XCircle size={14} />}
+                            <span>One uppercase letter (A-Z)</span>
+                          </div>
+                          <div className={`flex items-center gap-2 text-xs ${validation.hasLowercase ? 'text-green-600' : 'text-gray-500'}`}>
+                            {validation.hasLowercase ? <CheckCircle size={14} /> : <XCircle size={14} />}
+                            <span>One lowercase letter (a-z)</span>
+                          </div>
+                          <div className={`flex items-center gap-2 text-xs ${validation.hasNumber ? 'text-green-600' : 'text-gray-500'}`}>
+                            {validation.hasNumber ? <CheckCircle size={14} /> : <XCircle size={14} />}
+                            <span>One number (0-9)</span>
+                          </div>
+                          <div className={`flex items-center gap-2 text-xs ${validation.hasSpecial ? 'text-green-600' : 'text-gray-500'}`}>
+                            {validation.hasSpecial ? <CheckCircle size={14} /> : <XCircle size={14} />}
+                            <span>One special character (!@#$%^&*)</span>
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
+                </div>
+              )}
               <div className="flex justify-end pt-4">
                 <Button variant="outline" type="submit">
                   {t('updatePassword')}

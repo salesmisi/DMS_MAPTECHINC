@@ -1,7 +1,42 @@
-import React, { useState } from 'react';
-import { XIcon, UserPlusIcon } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { XIcon, UserPlusIcon, CheckCircle, XCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useDocuments } from '../context/DocumentContext';
+
+// Password validation rules
+const PASSWORD_RULES = {
+  minLength: 8,
+  hasUppercase: /[A-Z]/,
+  hasLowercase: /[a-z]/,
+  hasNumber: /[0-9]/,
+  hasSpecial: /[!@#$%^&*(),.?":{}|<>_\-+=\[\]\\\/`~;']/,
+};
+
+interface PasswordValidation {
+  minLength: boolean;
+  hasUppercase: boolean;
+  hasLowercase: boolean;
+  hasNumber: boolean;
+  hasSpecial: boolean;
+  isValid: boolean;
+}
+
+const validatePassword = (password: string): PasswordValidation => {
+  const minLength = password.length >= PASSWORD_RULES.minLength;
+  const hasUppercase = PASSWORD_RULES.hasUppercase.test(password);
+  const hasLowercase = PASSWORD_RULES.hasLowercase.test(password);
+  const hasNumber = PASSWORD_RULES.hasNumber.test(password);
+  const hasSpecial = PASSWORD_RULES.hasSpecial.test(password);
+
+  return {
+    minLength,
+    hasUppercase,
+    hasLowercase,
+    hasNumber,
+    hasSpecial,
+    isValid: minLength && hasUppercase && hasLowercase && hasNumber && hasSpecial,
+  };
+};
 interface CreateUserModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -18,6 +53,13 @@ export function CreateUserModal({ isOpen, onClose }: CreateUserModalProps) {
     department: ''
   });
   const [error, setError] = useState('');
+
+  // Password validation state
+  const passwordValidation = useMemo(
+    () => validatePassword(formData.password),
+    [formData.password]
+  );
+
   if (!isOpen) return null;
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,8 +72,8 @@ export function CreateUserModal({ isOpen, onClose }: CreateUserModalProps) {
       setError('Passwords do not match');
       return;
     }
-    if (formData.password.length < 6) {
-      setError('Password must be at least 6 characters');
+    if (!passwordValidation.isValid) {
+      setError('Password does not meet security requirements');
       return;
     }
     try {
@@ -195,9 +237,37 @@ export function CreateUserModal({ isOpen, onClose }: CreateUserModalProps) {
               }))
               }
               className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-maptech-primary/50 focus:border-maptech-primary"
-              placeholder="Enter password (min 6 characters)"
+              placeholder="Enter secure password"
               required />
 
+            {/* Password Rules Checklist */}
+            {formData.password.length > 0 && (
+              <div className="mt-2 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                <p className="text-xs font-medium text-gray-600 mb-2">Password Requirements:</p>
+                <div className="grid grid-cols-1 gap-1.5">
+                  <div className={`flex items-center gap-2 text-xs ${passwordValidation.minLength ? 'text-green-600' : 'text-gray-500'}`}>
+                    {passwordValidation.minLength ? <CheckCircle size={14} /> : <XCircle size={14} />}
+                    <span>At least 8 characters</span>
+                  </div>
+                  <div className={`flex items-center gap-2 text-xs ${passwordValidation.hasUppercase ? 'text-green-600' : 'text-gray-500'}`}>
+                    {passwordValidation.hasUppercase ? <CheckCircle size={14} /> : <XCircle size={14} />}
+                    <span>One uppercase letter (A-Z)</span>
+                  </div>
+                  <div className={`flex items-center gap-2 text-xs ${passwordValidation.hasLowercase ? 'text-green-600' : 'text-gray-500'}`}>
+                    {passwordValidation.hasLowercase ? <CheckCircle size={14} /> : <XCircle size={14} />}
+                    <span>One lowercase letter (a-z)</span>
+                  </div>
+                  <div className={`flex items-center gap-2 text-xs ${passwordValidation.hasNumber ? 'text-green-600' : 'text-gray-500'}`}>
+                    {passwordValidation.hasNumber ? <CheckCircle size={14} /> : <XCircle size={14} />}
+                    <span>One number (0-9)</span>
+                  </div>
+                  <div className={`flex items-center gap-2 text-xs ${passwordValidation.hasSpecial ? 'text-green-600' : 'text-gray-500'}`}>
+                    {passwordValidation.hasSpecial ? <CheckCircle size={14} /> : <XCircle size={14} />}
+                    <span>One special character (!@#$%^&*)</span>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Confirm Password */}

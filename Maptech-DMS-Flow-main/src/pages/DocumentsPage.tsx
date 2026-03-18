@@ -294,6 +294,21 @@ export function DocumentsPage() {
     return matchSearch && matchDept && matchStatus && matchType && matchFolder && hasDocumentAccess(doc);
   });
 
+  React.useEffect(() => {
+    const pendingDocId = sessionStorage.getItem('dms_preview_doc_id');
+    if (!pendingDocId) return;
+
+    const docToPreview = activeDocuments.find((d) => String(d.id) === String(pendingDocId));
+    if (!docToPreview) return;
+
+    if (docToPreview.folderId && selectFolder) {
+      selectFolder(docToPreview.folderId);
+    }
+
+    setViewingDoc(docToPreview);
+    sessionStorage.removeItem('dms_preview_doc_id');
+  }, [activeDocuments, selectFolder]);
+
   const searchSuggestions = React.useMemo(() =>
     activeDocuments.filter(d => hasDocumentAccess(d)).flatMap((d) => [d.title, d.reference]).filter(Boolean),
     [activeDocuments, user]

@@ -14,14 +14,40 @@ interface PendingScan {
   userName: string;
   department: string;
   departmentId?: string;
+  batchId?: string;
+  pageNumber?: number;
+  createdAt: Date;
+}
+
+interface BatchPage {
+  sessionId: string;
+  pageNumber: number;
+  filePath: string;
+  ext: string;
+  sizeBytes: number;
+  createdAt: Date;
+}
+
+interface MultiPageBatch {
+  batchId: string;
+  title: string;
+  format: string;
+  folderId: string;
+  userId: string;
+  userName: string;
+  department: string;
+  departmentId?: string;
+  pages: BatchPage[];
   createdAt: Date;
 }
 
 const pendingScans: Map<string, PendingScan> = new Map();
+const multiPageBatches: Map<string, MultiPageBatch> = new Map();
 let watcher: chokidar.FSWatcher | null = null;
 
 // Get the scans directory path
 const SCANS_DIR = process.env.SCANS_DIR || path.join(process.cwd(), 'scans');
+const BATCH_UPLOAD_DIR = path.join(process.cwd(), 'uploads', 'scan-batches');
 
 // Ensure scans directory exists
 export function ensureScansDir(): void {
@@ -29,6 +55,56 @@ export function ensureScansDir(): void {
     fs.mkdirSync(SCANS_DIR, { recursive: true });
     console.log(`Created scans directory: ${SCANS_DIR}`);
   }
+
+  if (!fs.existsSync(BATCH_UPLOAD_DIR)) {
+    fs.mkdirSync(BATCH_UPLOAD_DIR, { recursive: true });
+    console.log(`Created scan batch directory: ${BATCH_UPLOAD_DIR}`);
+  }
+}
+
+function ensureBatchDir(batchId: string): string {
+  const batchDir = path.join(BATCH_UPLOAD_DIR, batchId);
+  if (!fs.existsSync(batchDir)) {
+    fs.mkdirSync(batchDir, { recursive: true });
+  }
+  return batchDir;
+}
+
+export function createMultiPageBatch(batch: Omit<MultiPageBatch, 'pages' | 'createdAt'>): MultiPageBatch {
+  const existing = multiPageBatches.get(batch.batchId);
+  if (existing) {
+    return existing;
+  }
+
+  const created: MultiPageBatch = {
+    ...batch,
+    pages: [],
+    createdAt: new Date()
+  };
+
+  multiPageBatches.set(batch.batchId, created);
+  ensureBatchDir(batch.batchId);
+  console.log(`Created multi-page scan batch: ${batch.batchId}`);
+  return created;
+}
+
+export function getMultiPageBatch(batchId: string): MultiPageBatch | undefined {
+  return multiPageBatches.get(batchId);
+}
+
+export function clearMultiPageBatch(batchId: string): boolean {
+  const exists = multiPageBatches.delete(batchId);
+  const batchDir = path.join(BATCH_UPLOAD_DIR, batchId);
+
+  try {
+    if (fs.existsSync(batchDir)) {
+      fs.rmSync(batchDir, { recursive: true, force: true });
+    }
+  } catch (err) {
+    console.warn(`Failed to cleanup batch directory ${batchDir}:`, err);
+  }
+
+  return exists;
 }
 
 // Add a pending scan session
@@ -79,6 +155,49 @@ async function processScannedFile(filePath: string): Promise<void> {
   }
 
   try {
+    if (pendingScan.batchId) {
+      const batch = getMultiPageBatch(pendingScan.batchId);
+      if (!batch) {
+        throw new Error(`Multi-page batch not found: ${pendingScan.batchId}`);
+      }
+
+      const sourceStat = fs.statSync(filePath);
+      const pageNumber = pendingScan.pageNumber || batch.pages.length + 1;
+      const batchDir = ensureBatchDir(batch.batchId);
+      const pageFileName = `page_${String(pageNumber).padStart(3, '0')}_${Date.now()}.${ext || 'pdf'}`;
+      const batchFilePath = path.join(batchDir, pageFileName);
+
+      fs.copyFileSync(filePath, batchFilePath);
+
+      batch.pages.push({
+        sessionId: pendingScan.sessionId,
+        pageNumber,
+        filePath: batchFilePath,
+        ext: ext || pendingScan.format,
+        sizeBytes: sourceStat.size,
+        createdAt: new Date()
+      });
+
+      batch.pages.sort((a, b) => a.pageNumber - b.pageNumber || a.createdAt.getTime() - b.createdAt.getTime());
+
+      await pool.query(`
+        UPDATE scan_sessions
+        SET status = 'completed', completed_at = NOW()
+        WHERE id = $1
+      `, [pendingScan.sessionId]);
+
+      removePendingScan(pendingScan.sessionId);
+
+      try {
+        fs.unlinkSync(filePath);
+      } catch (e) {
+        console.log(`Could not delete original scan file: ${filePath}`);
+      }
+
+      console.log(`Captured page ${pageNumber} for batch ${batch.batchId}`);
+      return;
+    }
+
     // Read file content
     const fileBuffer = fs.readFileSync(filePath);
     const fileSize = fs.statSync(filePath).size;
@@ -299,6 +418,10 @@ export default {
   addPendingScan,
   getPendingScan,
   removePendingScan,
+  createMultiPageBatch,
+  getMultiPageBatch,
+  clearMultiPageBatch,
   ensureScansDir,
-  SCANS_DIR
+  SCANS_DIR,
+  BATCH_UPLOAD_DIR
 };

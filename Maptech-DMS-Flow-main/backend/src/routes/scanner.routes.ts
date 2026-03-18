@@ -13,6 +13,12 @@ router.get('/devices', authenticate, scannerController.listScanners);
 // Start a new scan
 router.post('/scan', authenticate, scannerController.startScan);
 
+// Finalize a multi-page scan batch into one document
+router.post('/scan-batch/:batchId/finalize', authenticate, scannerController.finalizeScanBatch);
+
+// Discard a multi-page scan batch
+router.delete('/scan-batch/:batchId', authenticate, scannerController.discardScanBatch);
+
 // Get scan session status
 router.get('/scan/:sessionId', authenticate, scannerController.getScanStatus);
 

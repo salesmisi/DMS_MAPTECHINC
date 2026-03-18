@@ -73,6 +73,10 @@ export function ScannerDashboard() {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [scanComplete, setScanComplete] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
+  const [multiPageMode, setMultiPageMode] = useState(true);
+  const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
+  const [scannedPages, setScannedPages] = useState(0);
+  const [finalizingBatch, setFinalizingBatch] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingScanners, setLoadingScanners] = useState(false);
   const [watcherStatus, setWatcherStatus] = useState<{
@@ -221,7 +225,7 @@ export function ScannerDashboard() {
   }, []);
 
   // Poll for scan completion
-  const pollScanStatus = useCallback(async (sessionId: string) => {
+  const pollScanStatus = useCallback(async (sessionId: string, options?: { multiPage?: boolean; batchId?: string }) => {
     const maxAttempts = 400; // 2 minutes with 300ms intervals
     let attempts = 0;
 
@@ -236,6 +240,16 @@ export function ScannerDashboard() {
           setScanning(false);
           setScanComplete(true);
           setCurrentSessionId(null);
+
+          if (options?.multiPage) {
+            if (options.batchId) {
+              setActiveBatchId(options.batchId);
+            }
+            setScannedPages((prev) => prev + 1);
+            setTimeout(() => setScanComplete(false), 3000);
+            await loadRecentScans();
+            return;
+          }
 
           // Refresh documents list
           await refreshDocuments?.();
@@ -314,6 +328,8 @@ export function ScannerDashboard() {
       // Use subfolder if selected, otherwise use parent folder
       const targetFolderId = destFolder || parentFolder || null;
 
+      const isMultiPageScan = multiPageMode || !!activeBatchId;
+
       const res = await fetch(`${API_BASE}/scanner/scan`, {
         method: 'POST',
         headers: {
@@ -322,9 +338,12 @@ export function ScannerDashboard() {
         },
         body: JSON.stringify({
           title: docTitle,
-          format: fileFormat,
+          format: isMultiPageScan ? 'pdf' : fileFormat,
           folderId: targetFolderId,
-          scannerName: scannerName
+          scannerName: scannerName,
+          multiPage: isMultiPageScan,
+          batchId: activeBatchId,
+          pageNumber: scannedPages + 1
         })
       });
 
@@ -335,6 +354,9 @@ export function ScannerDashboard() {
       }
 
       setCurrentSessionId(data.sessionId);
+      if (data.batchId) {
+        setActiveBatchId(data.batchId);
+      }
 
       if (data.manualMode) {
         // NAPS2 not installed - show manual mode instructions
@@ -342,15 +364,96 @@ export function ScannerDashboard() {
       }
 
       // Start polling for completion
-      pollScanStatus(data.sessionId);
+      pollScanStatus(data.sessionId, {
+        multiPage: isMultiPageScan,
+        batchId: data.batchId || activeBatchId || undefined
+      });
 
-      // Clear title for next scan
-      setDocTitle('');
+      if (!isMultiPageScan) {
+        // Clear title for next scan in single-page mode
+        setDocTitle('');
+      }
 
     } catch (err: any) {
       console.error('Scan error:', err);
       setScanError(err.message || 'Failed to start scan');
       setScanning(false);
+    }
+  };
+
+  const handleFinalizeBatch = async () => {
+    if (!activeBatchId || scannedPages === 0) return;
+
+    setFinalizingBatch(true);
+    setScanError(null);
+
+    try {
+      const res = await fetch(`${API_BASE}/scanner/scan-batch/${activeBatchId}/finalize`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${getToken()}`
+        }
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to finalize multi-page scan');
+      }
+
+      await refreshDocuments?.();
+      await loadRecentScans();
+      await loadLastScanned();
+
+      const targetFolderId = destFolder || parentFolder || null;
+      const targetFolder = visibleFolders.find((f) => f.id === targetFolderId);
+      const folderName = targetFolder?.name || 'Root';
+      const selectedScannerObj = scanners.find((s) => s.id === selectedScanner);
+      const scannerName = selectedScannerObj?.name || 'Unknown Scanner';
+
+      addLog({
+        userId: user?.id || '',
+        userName: user?.name || '',
+        userRole: user?.role || '',
+        action: 'DOCUMENT_SCANNED',
+        target: docTitle,
+        targetType: 'document',
+        timestamp: new Date().toISOString(),
+        ipAddress: '',
+        details: `Multi-page scan (${scannedPages} pages) by ${user?.name || 'Unknown'} using ${scannerName}. Saved to folder: ${folderName}. Reference: ${data.document?.reference || 'N/A'}`
+      });
+
+      setScanComplete(true);
+      setActiveBatchId(null);
+      setScannedPages(0);
+      setCurrentSessionId(null);
+      setDocTitle('');
+      setTimeout(() => setScanComplete(false), 3000);
+    } catch (err: any) {
+      console.error('Finalize batch error:', err);
+      setScanError(err.message || 'Failed to finalize batch');
+    } finally {
+      setFinalizingBatch(false);
+    }
+  };
+
+  const handleDiscardBatch = async () => {
+    if (!activeBatchId) return;
+
+    try {
+      await fetch(`${API_BASE}/scanner/scan-batch/${activeBatchId}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${getToken()}`
+        }
+      });
+    } catch (err) {
+      console.error('Discard batch error:', err);
+    } finally {
+      setActiveBatchId(null);
+      setScannedPages(0);
+      setCurrentSessionId(null);
+      setScanning(false);
+      setScanComplete(false);
     }
   };
 
@@ -585,9 +688,29 @@ export function ScannerDashboard() {
                     setScanError(null);
                   }}
                   placeholder="Enter document title..."
-                  disabled={scanning}
+                  disabled={scanning || (activeBatchId !== null && scannedPages > 0)}
                   className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#427A43] disabled:bg-gray-50"
                 />
+              </div>
+
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={multiPageMode || activeBatchId !== null}
+                    onChange={(e) => setMultiPageMode(e.target.checked)}
+                    disabled={scanning || activeBatchId !== null}
+                    className="mt-0.5"
+                  />
+                  <span className="text-xs text-blue-800">
+                    Combine multiple scans into one PDF. After each page, you can continue scanning and finalize once all pages are captured.
+                  </span>
+                </label>
+                {activeBatchId && (
+                  <p className="text-xs text-blue-700 mt-2">
+                    Multi-page session active: {scannedPages} page{scannedPages === 1 ? '' : 's'} captured.
+                  </p>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -598,7 +721,7 @@ export function ScannerDashboard() {
                   <select
                     value={fileFormat}
                     onChange={(e) => setFileFormat(e.target.value)}
-                    disabled={scanning}
+                    disabled={scanning || multiPageMode || activeBatchId !== null}
                     className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm disabled:bg-gray-50"
                   >
                     <option value="pdf">PDF</option>
@@ -671,7 +794,9 @@ export function ScannerDashboard() {
                 <div className="p-3 bg-green-50 rounded-lg border border-green-200 flex items-center gap-2">
                   <CheckCircle size={16} className="text-green-600" />
                   <span className="text-xs font-medium text-green-700">
-                    Scan complete! Document added to library.
+                    {activeBatchId
+                      ? `Page ${scannedPages} captured. Continue scanning or finalize to save one PDF.`
+                      : 'Scan complete! Document added to library.'}
                   </span>
                 </div>
               )}
@@ -681,7 +806,9 @@ export function ScannerDashboard() {
                 <div className="p-3 bg-blue-50 rounded-lg border border-blue-200 flex items-center gap-2">
                   <Loader2 size={16} className="text-blue-600 animate-spin" />
                   <span className="text-xs text-blue-700">
-                    Scanning in progress... Waiting for scanned file.
+                    {activeBatchId
+                      ? `Scanning page ${scannedPages + 1}... Waiting for scanned file.`
+                      : 'Scanning in progress... Waiting for scanned file.'}
                   </span>
                 </div>
               )}
@@ -689,7 +816,7 @@ export function ScannerDashboard() {
               <div className="flex gap-3">
                 <button
                   onClick={handleScan}
-                  disabled={scanning || !docTitle.trim()}
+                  disabled={scanning || finalizingBatch || !docTitle.trim()}
                   className="flex-1 py-3 bg-[#005F02] text-white font-semibold text-sm rounded-xl hover:bg-[#427A43] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
                   {scanning ? (
@@ -700,7 +827,7 @@ export function ScannerDashboard() {
                   ) : (
                     <>
                       <Zap size={18} />
-                      Start Scan
+                      {activeBatchId ? 'Scan Next Page' : 'Start Scan'}
                     </>
                   )}
                 </button>
@@ -714,6 +841,25 @@ export function ScannerDashboard() {
                   </button>
                 )}
               </div>
+
+              {activeBatchId && scannedPages > 0 && !scanning && (
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={handleFinalizeBatch}
+                    disabled={finalizingBatch}
+                    className="py-2.5 bg-[#427A43] text-white font-medium text-sm rounded-lg hover:bg-[#005F02] transition-colors disabled:opacity-60"
+                  >
+                    {finalizingBatch ? 'Finalizing...' : 'Finalize and Save PDF'}
+                  </button>
+                  <button
+                    onClick={handleDiscardBatch}
+                    disabled={finalizingBatch}
+                    className="py-2.5 border border-red-300 text-red-600 font-medium text-sm rounded-lg hover:bg-red-50 transition-colors disabled:opacity-60"
+                  >
+                    Discard Batch
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>

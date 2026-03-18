@@ -13,6 +13,22 @@ export const requestDelete = async (req: AuthRequest, res: Response) => {
     if (!['folder', 'document'].includes(type)) return res.status(400).json({ error: 'Invalid type' });
     if (!target_id || !userId) return res.status(400).json({ error: 'Missing target or user' });
 
+    // Check if target is a folder created by admin (protected folder)
+    if (type === 'folder') {
+      const folderCheck = await pool.query('SELECT * FROM folders WHERE id = $1', [target_id]);
+      if (folderCheck.rows.length > 0) {
+        const folder = folderCheck.rows[0];
+        // Prevent deletion request for department folders
+        if (folder.is_department) {
+          return res.status(403).json({ error: 'Department folders cannot be deleted.' });
+        }
+        // Prevent deletion request for admin-created subfolders
+        if (folder.created_by_role === 'admin') {
+          return res.status(403).json({ error: 'Admin-created folders cannot be deleted. Please contact your administrator.' });
+        }
+      }
+    }
+
     // Check for existing pending request for the same target
     const existing = await pool.query(
       `SELECT id FROM delete_requests WHERE target_id = $1 AND status = 'pending'`,
@@ -71,13 +87,32 @@ export const approveDeleteRequest = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
     const adminId = req.userId;
+
+    // Get the delete request first
+    const reqCheck = await pool.query('SELECT * FROM delete_requests WHERE id = $1 AND status = $2', [id, 'pending']);
+    if (reqCheck.rows.length === 0) return res.status(404).json({ error: 'Request not found or already processed' });
+    const request = reqCheck.rows[0];
+
+    // Check if target folder is admin-created (protected)
+    if (request.type === 'folder') {
+      const folderCheck = await pool.query('SELECT * FROM folders WHERE id = $1', [request.target_id]);
+      if (folderCheck.rows.length > 0) {
+        const folder = folderCheck.rows[0];
+        if (folder.is_department) {
+          return res.status(403).json({ error: 'Department folders cannot be deleted.' });
+        }
+        if (folder.created_by_role === 'admin') {
+          return res.status(403).json({ error: 'Admin-created folders cannot be deleted through delete requests.' });
+        }
+      }
+    }
+
     // Mark as approved
     const result = await pool.query(
       `UPDATE delete_requests SET status = 'approved', approved_by = $1, approved_at = NOW() WHERE id = $2 AND status = 'pending' RETURNING *`,
       [adminId, id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Request not found or already processed' });
-    const request = result.rows[0];
 
     // Notify requester of approval
     await pool.query(
@@ -107,7 +142,7 @@ export const approveDeleteRequest = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: 'Invalid delete request type' });
     }
 
-    return res.json({ request, deleted: deleteResult.rows[0] });
+    return res.json({ request: result.rows[0], deleted: deleteResult.rows[0] });
   } catch (err) {
     console.error('approveDeleteRequest error:', err);
     return res.status(500).json({ error: 'Server error' });

@@ -280,8 +280,14 @@ export default function AdminDeleteRequests() {
                               onClick={() => {
                                 try {
                                   if (req.type === 'document') {
-                                    const folderId = req.resolvedTarget?.folder_id || req.resolvedTarget?.folderId || null;
-                                    if (folderId && selectFolder) selectFolder(folderId);
+                                    const docId = req.resolvedTarget?.id || req.target_id;
+                                    if (docId) {
+                                      sessionStorage.setItem('dms_preview_doc_id', String(docId));
+                                      const folderId = req.resolvedTarget?.folder_id || req.resolvedTarget?.folderId || null;
+                                      if (folderId && selectFolder) selectFolder(folderId);
+                                      navigate('documents');
+                                      return;
+                                    }
                                     navigate('documents');
                                   } else {
                                     const fid = req.resolvedTarget?.id || req.target_id;

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff, CheckCircle, XCircle } from 'lucide-react';
 import {
   Users,
   Plus,
@@ -17,6 +17,41 @@ import { useAuth } from '../context/AuthContext';
 import { useDocuments } from '../context/DocumentContext';
 import { AutocompleteSearch } from '../components/AutocompleteSearch';
 import { useLanguage } from '../context/LanguageContext';
+
+// Password validation rules
+const PASSWORD_RULES = {
+  minLength: 8,
+  hasUppercase: /[A-Z]/,
+  hasLowercase: /[a-z]/,
+  hasNumber: /[0-9]/,
+  hasSpecial: /[!@#$%^&*(),.?":{}|<>_\-+=\[\]\\\/`~;']/,
+};
+
+interface PasswordValidation {
+  minLength: boolean;
+  hasUppercase: boolean;
+  hasLowercase: boolean;
+  hasNumber: boolean;
+  hasSpecial: boolean;
+  isValid: boolean;
+}
+
+const validatePassword = (password: string): PasswordValidation => {
+  const minLength = password.length >= PASSWORD_RULES.minLength;
+  const hasUppercase = PASSWORD_RULES.hasUppercase.test(password);
+  const hasLowercase = PASSWORD_RULES.hasLowercase.test(password);
+  const hasNumber = PASSWORD_RULES.hasNumber.test(password);
+  const hasSpecial = PASSWORD_RULES.hasSpecial.test(password);
+
+  return {
+    minLength,
+    hasUppercase,
+    hasLowercase,
+    hasNumber,
+    hasSpecial,
+    isValid: minLength && hasUppercase && hasLowercase && hasNumber && hasSpecial,
+  };
+};
 
 interface Department {
   id: string;
@@ -747,7 +782,7 @@ export function UserManagement() {
                   {resetPwError && (
                     <p className="text-sm text-red-600 mb-3">{resetPwError}</p>
                   )}
-                  <div className="w-full relative mb-5">
+                  <div className="w-full relative mb-3">
                     <input
                       type={resetPwShow ? 'text' : 'password'}
                       value={resetPwValue}
@@ -763,11 +798,47 @@ export function UserManagement() {
                       {resetPwShow ? <EyeOff size={18} /> : <Eye size={15} />}
                     </button>
                   </div>
+                  {/* Password Rules Checklist */}
+                  {resetPwValue.length > 0 && (
+                    <div className="w-full mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200 text-left">
+                      <p className="text-xs font-medium text-gray-600 mb-2">Password Requirements:</p>
+                      <div className="grid grid-cols-1 gap-1.5">
+                        {(() => {
+                          const validation = validatePassword(resetPwValue);
+                          return (
+                            <>
+                              <div className={`flex items-center gap-2 text-xs ${validation.minLength ? 'text-green-600' : 'text-gray-500'}`}>
+                                {validation.minLength ? <CheckCircle size={14} /> : <XCircle size={14} />}
+                                <span>At least 8 characters</span>
+                              </div>
+                              <div className={`flex items-center gap-2 text-xs ${validation.hasUppercase ? 'text-green-600' : 'text-gray-500'}`}>
+                                {validation.hasUppercase ? <CheckCircle size={14} /> : <XCircle size={14} />}
+                                <span>One uppercase letter (A-Z)</span>
+                              </div>
+                              <div className={`flex items-center gap-2 text-xs ${validation.hasLowercase ? 'text-green-600' : 'text-gray-500'}`}>
+                                {validation.hasLowercase ? <CheckCircle size={14} /> : <XCircle size={14} />}
+                                <span>One lowercase letter (a-z)</span>
+                              </div>
+                              <div className={`flex items-center gap-2 text-xs ${validation.hasNumber ? 'text-green-600' : 'text-gray-500'}`}>
+                                {validation.hasNumber ? <CheckCircle size={14} /> : <XCircle size={14} />}
+                                <span>One number (0-9)</span>
+                              </div>
+                              <div className={`flex items-center gap-2 text-xs ${validation.hasSpecial ? 'text-green-600' : 'text-gray-500'}`}>
+                                {validation.hasSpecial ? <CheckCircle size={14} /> : <XCircle size={14} />}
+                                <span>One special character (!@#$%^&*)</span>
+                              </div>
+                            </>
+                          );
+                        })()}
+                      </div>
+                    </div>
+                  )}
                   <div className="flex gap-3 w-full">
                     <button
                       onClick={async () => {
-                        if (resetPwValue.length < 6) {
-                          setResetPwError(t('passwordMinChars'));
+                        const validation = validatePassword(resetPwValue);
+                        if (!validation.isValid) {
+                          setResetPwError('Password does not meet security requirements');
                           return;
                         }
                         const success = await resetPassword(resetPwUser.id, resetPwValue);
