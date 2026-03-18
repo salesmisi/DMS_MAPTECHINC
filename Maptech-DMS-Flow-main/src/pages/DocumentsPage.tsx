@@ -177,10 +177,17 @@ export function DocumentsPage() {
   const visibleFolders = React.useMemo(() => {
     if (!user) return [];
     if (user.role === 'admin') return folders;
-    return folders.filter((folder) => {
+
+    // Build a set of visible folder IDs including descendants
+    const visibleIds = new Set<string>();
+
+    // First pass: find all directly visible root/parent folders
+    const directlyVisible = folders.filter((folder) => {
       const vis = (folder as any).visibility || 'private';
       if (vis === 'admin-only') return false;
-      if (user.role === 'manager') return folder.department === user.department;
+      if (user.role === 'manager') {
+        return String(folder.department || '').trim().toLowerCase() === String(user.department || '').trim().toLowerCase();
+      }
       if (user.role === 'staff') {
         if (vis === 'department' && String(folder.department || '').trim().toLowerCase() === String(user.department || '').trim().toLowerCase()) return true;
         if (vis === 'private' && String(folder.createdById || '') === String(user.id || '')) return true;
@@ -188,6 +195,33 @@ export function DocumentsPage() {
       }
       return false;
     });
+
+    directlyVisible.forEach((f) => visibleIds.add(f.id));
+
+    // Second pass: recursively add all descendants of visible folders
+    const addDescendants = (parentId: string) => {
+      folders.forEach((f) => {
+        if (f.parentId === parentId && !visibleIds.has(f.id)) {
+          visibleIds.add(f.id);
+          addDescendants(f.id);
+        }
+      });
+    };
+
+    directlyVisible.forEach((f) => addDescendants(f.id));
+
+    // Third pass: add ancestors of visible folders (so tree structure is complete)
+    const addAncestors = (folderId: string) => {
+      const folder = folders.find((f) => f.id === folderId);
+      if (folder?.parentId && !visibleIds.has(folder.parentId)) {
+        visibleIds.add(folder.parentId);
+        addAncestors(folder.parentId);
+      }
+    };
+
+    directlyVisible.forEach((f) => addAncestors(f.id));
+
+    return folders.filter((f) => visibleIds.has(f.id));
   }, [folders, user]);
   const [showUpload, setShowUpload] = useState(false);
   const [actionDoc, setActionDoc] = useState<string | null>(null);
@@ -221,16 +255,31 @@ export function DocumentsPage() {
   }, [folders, users]);
 
   const activeDocuments = documents.filter((d) => d.status !== 'trashed' && d.status !== 'archived');
+
+  // Build a set of visible folder IDs for quick lookup
+  const visibleFolderIds = React.useMemo(() => {
+    return new Set(visibleFolders.map((f) => f.id));
+  }, [visibleFolders]);
+
   // Role-based document visibility:
   // admin -> all documents
-  // manager -> documents in their department
-  // staff -> only documents uploaded by themselves
+  // manager -> documents in their department OR in any visible folder
+  // staff -> documents they uploaded OR in their department OR in any visible folder
   const hasDocumentAccess = (doc: Document) => {
     if (!user) return false;
     if (user.role === 'admin') return true;
-    if (user.role === 'manager') return doc.department === user.department;
-    // staff: allow staff to see documents in their department or documents they uploaded
-    return doc.uploadedById === user.id || String(doc.department || '').trim().toLowerCase() === String(user.department || '').trim().toLowerCase();
+
+    // Check if document is in a visible folder
+    const inVisibleFolder = doc.folderId && visibleFolderIds.has(doc.folderId);
+
+    if (user.role === 'manager') {
+      return doc.department === user.department || inVisibleFolder;
+    }
+
+    // staff: allow staff to see documents in their department, their uploads, or in visible folders
+    return doc.uploadedById === user.id ||
+           String(doc.department || '').trim().toLowerCase() === String(user.department || '').trim().toLowerCase() ||
+           inVisibleFolder;
   };
 
   const filtered = activeDocuments.filter((doc) => {
@@ -306,6 +355,17 @@ export function DocumentsPage() {
   };
   const handleView = (doc: Document) => {
     setViewingDoc(doc);
+    addLog({
+      userId: user?.id || '',
+      userName: user?.name || '',
+      userRole: user?.role || '',
+      action: 'DOCUMENT_VIEWED',
+      target: doc.title,
+      targetType: 'document',
+      timestamp: new Date().toISOString(),
+      ipAddress: '192.168.1.100',
+      details: `Viewed document: ${doc.reference} in folder ${doc.folderId || 'root'}`
+    });
   };
   const handleDownload = async (doc: Document) => {
     try {
@@ -358,6 +418,27 @@ export function DocumentsPage() {
     document.addEventListener('mouseup', onMouseUp);
   };
 
+  // Wrapper for folder selection with activity logging
+  const handleFolderSelect = (folderId: string | null) => {
+    if (selectFolder) {
+      selectFolder(folderId);
+      if (folderId) {
+        const folder = visibleFolders.find(f => f.id === folderId);
+        addLog({
+          userId: user?.id || '',
+          userName: user?.name || '',
+          userRole: user?.role || '',
+          action: 'FOLDER_ACCESSED',
+          target: folder?.name || folderId,
+          targetType: 'folder',
+          timestamp: new Date().toISOString(),
+          ipAddress: '192.168.1.100',
+          details: `Accessed folder: ${folder?.name || folderId}`
+        });
+      }
+    }
+  };
+
   return (
     <div className="flex gap-6 h-full">
       {/* Folder Tree Sidebar */}
@@ -381,7 +462,7 @@ export function DocumentsPage() {
             !selectedFolder ? 'bg-[#005F02] text-white' : 'text-gray-600 hover:bg-gray-100'
           }`}
           style={{ paddingLeft: '4px' }}
-          onClick={() => selectFolder && selectFolder(null)}
+          onClick={() => handleFolderSelect(null)}
         >
           <FolderOpen size={14} className="ft-icon" />
           <span className="ft-label">All Documents</span>
@@ -392,7 +473,7 @@ export function DocumentsPage() {
             key={folder.id}
             folder={folder}
             selectedFolder={selectedFolder}
-            selectFolder={selectFolder ?? null}
+            selectFolder={handleFolderSelect}
             getChildren={getChildren}
             onCreateSubfolder={(parentId) => {
               setNewFolderParentId(parentId);
