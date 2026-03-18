@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Trash2, RotateCcw, AlertTriangle, Clock, Search } from 'lucide-react';
+import { Trash2, RotateCcw, AlertTriangle, Clock } from 'lucide-react';
 import { useDocuments } from '../context/DocumentContext';
 import { useAuth } from '../context/AuthContext';
+import { AutocompleteSearch } from '../components/AutocompleteSearch';
 export function TrashPage() {
   const { documents, restoreDocument, permanentlyDelete, addLog } =
   useDocuments();
@@ -21,6 +22,10 @@ export function TrashPage() {
   const trashed = documents.filter((d) => d.status === 'trashed' && hasAccess(d));
   const filtered = trashed.filter(
     (d) => !search || d.title.toLowerCase().includes(search.toLowerCase())
+  );
+  const trashSuggestions = React.useMemo(() =>
+    trashed.map((d) => d.title).filter(Boolean),
+    [trashed]
   );
   //retention////////////////////////////////////////////////////////////////////////////////////
   const getDaysRemaining = (trashedAt?: string) => {
@@ -140,16 +145,13 @@ export function TrashPage() {
       }
 
       {/* Search */}
-      <div className="flex items-center gap-2 bg-white rounded-xl px-4 py-2.5 shadow-sm border border-gray-100 max-w-md">
-        <Search size={16} className="text-gray-400" />
-        <input
-          type="text"
-          placeholder="Search trash..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="bg-transparent text-sm outline-none flex-1 text-gray-700" />
-
-      </div>
+      <AutocompleteSearch
+        value={search}
+        onChange={setSearch}
+        suggestions={trashSuggestions}
+        placeholder="Search trash..."
+        className="bg-white rounded-xl px-4 py-2.5 shadow-sm border border-gray-100 max-w-md"
+      />
 
       {/* Trash List */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">

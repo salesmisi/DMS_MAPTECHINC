@@ -20,6 +20,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { useNavigation, PageName } from '../App';
 import { useDocuments } from '../context/DocumentContext';
+import { useLanguage } from '../context/LanguageContext';
 interface SidebarProps {
   isOpen: boolean;
   onToggle: () => void;
@@ -39,12 +40,13 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
   const { user, logout } = useAuth();
   const { currentPage, navigate } = useNavigation();
   const { documents } = useDocuments();
+  const { t } = useLanguage();
   const [expandedItems, setExpandedItems] = useState<string[]>(['documents']);
   const pendingCount = documents.filter((d) => d.status === 'pending').length;
   const navItems: NavItem[] = [
   {
     id: 'dashboard',
-    label: 'Dashboard',
+    label: t('dashboard'),
     icon: <LayoutDashboard size={18} />,
     roles: ['admin', 'manager', 'staff']
   },
@@ -52,7 +54,7 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
   [
   {
     id: 'approvals' as PageName,
-    label: 'Pending Approvals',
+    label: t('pendingApprovals'),
     icon: <CheckSquare size={18} />,
     roles: ['manager'],
     badge: pendingCount
@@ -61,36 +63,51 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
   []),
   {
     id: 'documents',
-    label: 'Documents',
+    label: t('documents'),
     icon: <FileText size={18} />,
     roles: ['admin', 'manager', 'staff']
   },
   {
     id: 'scanner',
-    label: 'Scanner Dashboard',
+    label: t('scannerDashboard'),
     icon: <Scan size={18} />,
     roles: ['admin', 'manager', 'staff']
   },
   ...(user?.role === 'admin' ?
   [
-  {
-    id: 'users' as PageName,
-    label: 'User Management',
-    icon: <Users size={18} />,
-    roles: ['admin']
-  }
+    {
+      id: 'users' as PageName,
+      label: t('userManagement'),
+      icon: <Users size={18} />,
+      roles: ['admin']
+    },
+    {
+      id: 'admin-delete-requests' as PageName,
+      label: t('deleteRequests'),
+      icon: <Trash2 size={18} />,
+      roles: ['admin']
+    }
   ] :
-
+  []),
+  ...(user?.role === 'manager' ?
+  [
+    {
+      id: 'admin-delete-requests' as PageName,
+      label: t('deleteRequests'),
+      icon: <Trash2 size={18} />,
+      roles: ['manager']
+    }
+  ] :
   []),
   {
     id: 'archive',
-    label: 'Archives',
+    label: t('archives'),
     icon: <Archive size={18} />,
     roles: ['admin', 'manager', 'staff']
   },
   {
     id: 'trash',
-    label: 'Trash',
+    label: t('trash'),
     icon: <Trash2 size={18} />,
     roles: ['admin', 'manager', 'staff']
   },
@@ -98,7 +115,7 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
   [
   {
     id: 'activity-log' as PageName,
-    label: 'Activity Log',
+    label: t('activityLog'),
     icon: <Activity size={18} />,
     roles: ['admin']
   }] :
@@ -114,9 +131,9 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
     staff: '#F2E3BB'
   };
   const roleLabels: Record<string, string> = {
-    admin: 'Administrator',
-    manager: 'Department Manager',
-    staff: 'Staff'
+    admin: t('administrator'),
+    manager: t('departmentManager'),
+    staff: t('staff')
   };
   return (
     <>
@@ -155,13 +172,17 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
         <div className="px-4 py-3 border-b border-[#cad4ca]">
             <div className="flex items-center gap-3">
               <div
-              className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
+              className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 overflow-hidden"
               style={{
-                backgroundColor: roleColors[user.role],
+                backgroundColor: user.avatar ? 'transparent' : roleColors[user.role],
                 color: '#005F02'
               }}>
 
-                {user.name.charAt(0).toUpperCase()}
+                {user.avatar ? (
+                  <img src={`http://localhost:5000${user.avatar}`} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  user.name.charAt(0).toUpperCase()
+                )}
               </div>
               <div className="min-w-0">
                 <div className="text-[#eeece8] text-sm font-medium truncate">
@@ -175,7 +196,7 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
             {user.role === 'admin' &&
           <div className="mt-2 flex items-center gap-1 text-[#eeece8] text-xs">
                 <Shield size={12} />
-                <span>Full Access</span>
+                <span>{t('fullAccess')}</span>
               </div>
           }
           </div>
@@ -223,7 +244,7 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
             className="w-full flex items-center gap-3 px-4 py-2.5 text-[#eeece8] hover:bg-red-700 hover:text-white rounded transition-colors">
 
             <LogOut size={18} className="flex-shrink-0" />
-            {isOpen && <span className="text-sm font-medium">Logout</span>}
+            {isOpen && <span className="text-sm font-medium">{t('logout')}</span>}
           </button>
         </div>
       </div>

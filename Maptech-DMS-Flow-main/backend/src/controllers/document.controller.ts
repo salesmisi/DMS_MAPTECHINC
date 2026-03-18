@@ -262,6 +262,10 @@ export const restoreDocument = async (req: AuthRequest, res: Response) => {
 export const permanentlyDeleteDocument = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
+    // Only admin can delete directly; staff must request approval
+    if (req.userRole !== 'admin') {
+      return res.status(403).json({ error: 'Only admins can delete documents directly. Please request deletion for admin approval.' });
+    }
     const result = await pool.query('DELETE FROM documents WHERE id = $1 RETURNING id', [id]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Document not found' });
     return res.json({ message: 'Document permanently deleted' });
@@ -352,6 +356,64 @@ export const downloadDocument = async (req: AuthRequest, res: Response) => {
   }
 };
 
+// Preview document (inline, for in-browser rendering)
+export const previewDocument = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const docId = Array.isArray(id) ? id[0] : id;
+    const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+    if (!isUuid(docId)) return res.status(400).json({ error: 'Invalid document id' });
+
+    const result = await pool.query(
+      'SELECT title, file_type, file_path, file_data FROM documents WHERE id = $1',
+      [docId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Document not found' });
+
+    const doc = result.rows[0];
+    const ext = (doc.file_type || 'bin').toLowerCase();
+
+    const mimeTypes: Record<string, string> = {
+      pdf: 'application/pdf',
+      doc: 'application/msword',
+      docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      xls: 'application/vnd.ms-excel',
+      xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      ppt: 'application/vnd.ms-powerpoint',
+      pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      png: 'image/png',
+      mp4: 'video/mp4',
+      zip: 'application/zip',
+    };
+    const contentType = mimeTypes[ext] || 'application/octet-stream';
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', 'inline');
+
+    if (doc.file_path) {
+      const filePath = path.isAbsolute(doc.file_path)
+        ? doc.file_path
+        : path.join(process.cwd(), doc.file_path);
+      if (fs.existsSync(filePath)) {
+        const stream = fs.createReadStream(filePath);
+        stream.pipe(res);
+        return;
+      }
+    }
+
+    if (doc.file_data) {
+      return res.send(doc.file_data);
+    }
+
+    return res.status(404).json({ error: 'File content not found' });
+  } catch (err: any) {
+    console.error('previewDocument error:', err?.message || err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+};
+
 export default {
   createDocument,
   listDocuments,
@@ -361,5 +423,6 @@ export default {
   restoreDocument,
   permanentlyDeleteDocument,
   archiveDocument,
-  downloadDocument
+  downloadDocument,
+  previewDocument
 };

@@ -1,4 +1,6 @@
 import React, { useState, Children } from 'react';
+import RequestDeleteModal from '../components/RequestDeleteModal';
+import { AutocompleteSearch } from '../components/AutocompleteSearch';
 import {
   Search,
   Filter,
@@ -26,6 +28,7 @@ import { UploadModal } from '../components/UploadModal';
 import { DeleteFolderModal } from '../components/DeleteFolderModal';
 import FilePreview from '../components/FilePreview';
 import { useNavigation } from '../App';
+import { useLanguage } from '../context/LanguageContext';
 
 // Recursive folder tree item component
 const DT_INDENT = 10;
@@ -44,7 +47,7 @@ function FolderTreeItem({ folder, selectedFolder, selectFolder, getChildren, onC
   const [expanded, setExpanded] = React.useState(level < 2);
   const [deleteModal, setDeleteModal] = React.useState(false);
   const { deleteFolder, folders } = useDocuments();
-  const { user } = useAuth();
+  const { user, users } = useAuth();
   const children = getChildren(folder.id);
   const hasChildren = children.length > 0;
   const isSelected = selectedFolder === folder.id;
@@ -161,7 +164,8 @@ export function DocumentsPage() {
     uploadNewVersion,
     addFolder
   } = useDocuments();
-  const { user } = useAuth();
+  const { user, users } = useAuth();
+  const { t } = useLanguage();
   const [search, setSearch] = useState('');
   const [filterDept, setFilterDept] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
@@ -192,12 +196,29 @@ export function DocumentsPage() {
   const [showCreateFolder, setShowCreateFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [newFolderParentId, setNewFolderParentId] = useState<string | null>(null);
-  const departments = [
-  'Accounting',
-  'Marketing',
-  'Technical Support',
-  'HR',
-  'Administration'];
+  const departments = React.useMemo(() => {
+    // derive departments from root folders that are marked as department (locked)
+    // and only include those that also have at least one assigned user
+    if (!folders || folders.length === 0) return [];
+    const rootDeptSet = new Set<string>();
+    folders.forEach((f) => {
+      const isDept = (f as any).is_department || (f as any).isDepartment || false;
+      if ((!f.parentId && f.parent_id === undefined) || f.parentId === null || f.parent_id === null) {
+        if (isDept) {
+          const d = String(f.department || f.name || '').trim();
+          if (d) rootDeptSet.add(d);
+        }
+      }
+    });
+    if (!users || users.length === 0) return Array.from(rootDeptSet).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+    const userDeptSet = new Set<string>();
+    users.forEach((u: any) => {
+      const d = String(u.department || '').trim();
+      if (d) userDeptSet.add(d);
+    });
+    const intersection = Array.from(rootDeptSet).filter((d) => userDeptSet.has(d));
+    return intersection.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  }, [folders, users]);
 
   const activeDocuments = documents.filter((d) => d.status !== 'trashed' && d.status !== 'archived');
   // Role-based document visibility:
@@ -223,6 +244,11 @@ export function DocumentsPage() {
     const matchFolder = !selectedFolder || (doc.folderId && doc.folderId === selectedFolder);
     return matchSearch && matchDept && matchStatus && matchType && matchFolder && hasDocumentAccess(doc);
   });
+
+  const searchSuggestions = React.useMemo(() =>
+    activeDocuments.filter(d => hasDocumentAccess(d)).flatMap((d) => [d.title, d.reference]).filter(Boolean),
+    [activeDocuments, user]
+  );
   const rootFolders = visibleFolders.filter((f) => f.parentId === null);
   const getChildren = (parentId: string) => visibleFolders.filter((f) => f.parentId === parentId);
   const statusBadge = (status: string) => {
@@ -280,16 +306,6 @@ export function DocumentsPage() {
   };
   const handleView = (doc: Document) => {
     setViewingDoc(doc);
-    addLog({
-      userId: user?.id || '',
-      userName: user?.name || '',
-      userRole: user?.role || '',
-      action: 'DOCUMENT_VIEW',
-      target: doc.title,
-      targetType: 'document',
-      timestamp: new Date().toISOString(),
-      ipAddress: '192.168.1.100'
-    });
   };
   const handleDownload = async (doc: Document) => {
     try {
@@ -322,10 +338,30 @@ export function DocumentsPage() {
       alert('Failed to download file.');
     }
   };
+  const [sidebarWidth, setSidebarWidth] = useState(224);
+  const isResizing = React.useRef(false);
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    isResizing.current = true;
+    e.preventDefault();
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!isResizing.current) return;
+      const newWidth = Math.min(Math.max(ev.clientX - 16, 160), 480);
+      setSidebarWidth(newWidth);
+    };
+    const onMouseUp = () => {
+      isResizing.current = false;
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  };
+
   return (
     <div className="flex gap-6 h-full">
       {/* Folder Tree Sidebar */}
-      <div className="ft-container w-56 flex-shrink-0 bg-white rounded-xl shadow-sm border border-gray-100 p-3">
+      <div className="ft-container flex-shrink-0 bg-white rounded-xl shadow-sm border border-gray-100 p-3 relative" style={{ width: sidebarWidth }}>
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
             <FolderOpen size={16} className="text-[#427A43]" />
@@ -366,6 +402,11 @@ export function DocumentsPage() {
           />
           )}
         </div>
+        {/* Resize handle */}
+        <div
+          onMouseDown={handleMouseDown}
+          className="absolute top-0 right-0 w-1.5 h-full cursor-col-resize hover:bg-[#427A43]/30 rounded-r-xl transition-colors"
+        />
       </div>
 
       {/* Main Content */}
@@ -374,16 +415,13 @@ export function DocumentsPage() {
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
           <div className="flex flex-wrap items-center gap-3">
             {/* Search */}
-            <div className="flex items-center gap-2 bg-gray-100 rounded-lg px-3 py-2 flex-1 min-w-48">
-              <Search size={16} className="text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search by title or reference..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="bg-transparent text-sm outline-none flex-1 text-gray-700" />
-
-            </div>
+            <AutocompleteSearch
+              value={search}
+              onChange={setSearch}
+              suggestions={searchSuggestions}
+              placeholder="Search by title or reference..."
+              className="bg-gray-100 rounded-lg px-3 py-2 flex-1 min-w-48"
+            />
 
             {/* Filters */}
             <select
@@ -552,25 +590,30 @@ export function DocumentsPage() {
 
                             <Download size={15} />
                           </button>
-                          {(user?.role === 'admin' ||
-                    doc.uploadedById === user?.id) &&
-                    <>
+                          {user?.role === 'admin' && (
+                            <>
                               <button
-                        onClick={() => handleArchive(doc)}
-                        className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors"
-                        title="Archive">
-
+                                onClick={() => handleArchive(doc)}
+                                className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors"
+                                title="Archive">
                                 <Archive size={15} />
                               </button>
                               <button
-                        onClick={() => handleTrash(doc)}
-                        className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-                        title="Move to Trash">
-
+                                onClick={() => handleTrash(doc)}
+                                className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                                title="Move to Trash">
                                 <Trash2 size={15} />
                               </button>
                             </>
-                    }
+                          )}
+                          {user?.role !== 'admin' && (
+                            <button
+                              onClick={() => setActionDoc(doc.id)}
+                              className="p-1.5 text-orange-600 hover:bg-orange-50 rounded transition-colors"
+                              title="Request Delete">
+                              <Trash2 size={15} />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -804,8 +847,8 @@ export function DocumentsPage() {
         </div>
       }
 
-      {/* Move to Trash Confirmation */}
-      {trashTarget && (
+      {/* Move to Trash Confirmation (Admins only) */}
+      {user?.role === 'admin' && trashTarget && (
         <div
           className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
           onClick={() => setTrashTarget(null)}
@@ -845,6 +888,15 @@ export function DocumentsPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Request Delete Modal for staff */}
+      {user?.role !== 'admin' && actionDoc && (
+        <RequestDeleteModal
+          document={filtered.find((d) => d.id === actionDoc)}
+          onClose={() => setActionDoc(null)}
+          onRequested={() => setActionDoc(null)}
+        />
       )}
     </div>);
 

@@ -11,7 +11,9 @@ import {
 import { useDocuments } from '../context/DocumentContext';
 import { useAuth } from '../context/AuthContext';
 import { DeleteFolderModal } from './DeleteFolderModal';
+import RequestDeleteModal from './RequestDeleteModal';
 import { Folder } from '../context/DocumentContext';
+import { AutocompleteSearch } from './AutocompleteSearch';
 
 const INDENT = 10;
 const MAX_LVL = 6;
@@ -29,6 +31,7 @@ interface FolderNodeProps {
   selectedFolderId: string | null;
   onSelectFolder: (folderId: string | null) => void;
   folders: Folder[];
+  forceExpandIds?: Set<string> | null;
 }
 
 function FolderNode({
@@ -37,12 +40,17 @@ function FolderNode({
   selectedFolderId,
   onSelectFolder,
   folders,
+  forceExpandIds = null,
 }: FolderNodeProps) {
-  const [isExpanded, setIsExpanded] = useState(level < 2);
+  const [isExpanded, setIsExpanded] = useState(level < 2 || (forceExpandIds ? forceExpandIds.has(folder.id) : false));
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showRequestDeleteModal, setShowRequestDeleteModal] = useState(false);
   const { deleteFolder } = useDocuments();
   const { user } = useAuth();
   const children = folders.filter((f) => f.parentId === folder.id);
+  const sortByName = (x: Folder, y: Folder) =>
+    String(x.name || '').localeCompare(String(y.name || ''), undefined, { sensitivity: 'base' });
+  children.sort(sortByName);
   const hasChildren = children.length > 0;
   const isSelected = selectedFolderId === folder.id;
   const isDepartment = (folder as any).is_department || (folder as any).isDepartment || false;
@@ -88,13 +96,24 @@ function FolderNode({
           </span>
         )}
 
-        {canDelete && (
+        {canDelete && user?.role === 'admin' && (
           <button
             onClick={(e) => { e.stopPropagation(); setShowDeleteModal(true); }}
             className={`ft-action ${
               isSelected ? 'text-white/70 hover:text-white hover:bg-white/20' : 'text-gray-400 hover:text-red-600 hover:bg-red-50'
             }`}
             title="Delete folder"
+          >
+            <Trash2 size={12} />
+          </button>
+        )}
+        {canDelete && user?.role !== 'admin' && (
+          <button
+            onClick={(e) => { e.stopPropagation(); setShowRequestDeleteModal(true); }}
+            className={`ft-action ${
+              isSelected ? 'text-white/70 hover:text-white hover:bg-white/20' : 'text-gray-400 hover:text-orange-600 hover:bg-orange-50'
+            }`}
+            title="Request folder delete"
           >
             <Trash2 size={12} />
           </button>
@@ -121,6 +140,13 @@ function FolderNode({
           onCancel={() => setShowDeleteModal(false)}
         />
       )}
+      {showRequestDeleteModal && (
+        <RequestDeleteModal
+          document={{ id: folder.id, name: folder.name, type: 'folder' }}
+          onClose={() => setShowRequestDeleteModal(false)}
+          onRequested={() => setShowRequestDeleteModal(false)}
+        />
+      )}
 
       {isExpanded && hasChildren && (
         <div className="ft-children">
@@ -132,6 +158,7 @@ function FolderNode({
               selectedFolderId={selectedFolderId}
               onSelectFolder={onSelectFolder}
               folders={folders}
+              forceExpandIds={forceExpandIds}
             />
           ))}
         </div>
@@ -164,21 +191,93 @@ export function FolderTree({
     });
   }, [folders, user]);
 
-  const rootFolders = visibleFolders.filter((f) => f.parentId === null);
+  const sortByName = (x: Folder, y: Folder) =>
+    String(x.name || '').localeCompare(String(y.name || ''), undefined, { sensitivity: 'base' });
 
-  return (
-    <div className="ft-container bg-white rounded-lg shadow-sm border border-gray-200 p-3">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="font-semibold text-maptech-dark text-sm">Folders</h3>
-        {showCreateButton && onCreateFolder && (
-          <button
-            onClick={() => onCreateFolder(null)}
-            className="p-1 text-maptech-primary hover:bg-maptech-cream rounded-lg transition-colors"
-            title="Create new folder"
+  // Search state for filtering folders
+  const [searchTerm, setSearchTerm] = React.useState('');
+  const normalizedSearch = String(searchTerm || '').trim().toLowerCase();
+
+  const folderSuggestions = React.useMemo(() =>
+    visibleFolders.map((f) => f.name).filter(Boolean),
+    [visibleFolders]
+  );
+
+  // Build children map for quick traversal
+  const childrenMap = React.useMemo(() => {
+    const m: Record<string, Folder[]> = {};
+    visibleFolders.forEach((f) => {
+      const p = f.parentId || 'root';
+      if (!m[p]) m[p] = [];
+      m[p].push(f);
+    });
+    return m;
+  }, [visibleFolders]);
+
+  // Determine which folder ids should be shown/expanded when searching
+  const forceShowIds = React.useMemo(() => {
+    if (!normalizedSearch) return null;
+    const matched = new Set<string>();
+
+    const addDescendants = (id: string) => {
+      const children = childrenMap[id] || [];
+      children.forEach((c) => {
+        if (!matched.has(c.id)) {
+          matched.add(c.id);
+          addDescendants(c.id);
+        }
+      });
+    };
+
+    // Map by id for ancestor traversal
+    const byId: Record<string, Folder> = {};
+    visibleFolders.forEach((f) => (byId[f.id] = f));
+
+    visibleFolders.forEach((f) => {
+      if (String(f.name || '').toLowerCase().includes(normalizedSearch)) {
+        matched.add(f.id);
+        // include descendants
+        addDescendants(f.id);
+        // include ancestors
+        let p = f.parentId;
+        while (p) {
+          matched.add(p);
+          p = byId[p]?.parentId || null;
+        }
+      }
+    });
+
+    return matched;
+  }, [normalizedSearch, visibleFolders, childrenMap]);
+          {showDeleteModal && user?.role === 'admin' && (
+            <DeleteFolderModal
+              folderName={folder.name}
+              hasChildren={hasChildren}
+              childCount={children.length}
+              onConfirm={() => {
+                (async () => {
+                  if (isSelected) onSelectFolder && onSelectFolder(null);
+                  await deleteFolder(folder.id);
+                  setShowDeleteModal(false);
+                })();
+              }}
+              onCancel={() => setShowDeleteModal(false)}
+            />
+          )}
           >
             <PlusIcon size={16} />
           </button>
         )}
+      </div>
+
+      <div className="mb-3">
+        <AutocompleteSearch
+          value={searchTerm}
+          onChange={setSearchTerm}
+          suggestions={folderSuggestions}
+          placeholder="Search folders..."
+          className="w-full px-2 py-1 border rounded-md"
+        />
       </div>
 
       {/* All Documents */}
@@ -203,6 +302,7 @@ export function FolderTree({
             selectedFolderId={selectedFolderId}
             onSelectFolder={onSelectFolder}
             folders={visibleFolders}
+            forceExpandIds={forceShowIds}
           />
         ))}
       </div>

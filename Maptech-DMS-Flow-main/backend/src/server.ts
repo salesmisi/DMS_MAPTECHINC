@@ -19,6 +19,9 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
+// Serve uploaded files statically
+app.use('/uploads', express.static(uploadsDir));
+
 app.get('/', (req, res) => res.send('API running'));
 
 // Auto-migration: ensure schema is up to date
@@ -68,6 +71,22 @@ async function runMigrations() {
     } catch (e) {
       // ignore
     }
+    // Create activity_logs_archive table if missing
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS activity_logs_archive (
+        id          UUID PRIMARY KEY,
+        user_id     UUID NOT NULL,
+        user_name   VARCHAR(150) NOT NULL,
+        user_role   VARCHAR(20) NOT NULL,
+        action      VARCHAR(100) NOT NULL,
+        target      VARCHAR(255) NOT NULL,
+        target_type VARCHAR(20) NOT NULL,
+        ip_address  VARCHAR(45),
+        details     TEXT,
+        created_at  TIMESTAMPTZ NOT NULL,
+        archived_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
     console.log('Migrations applied successfully');
   } catch (e: any) {
     console.warn('Migration warning:', e?.message || e);
@@ -82,6 +101,8 @@ import folderRoutes from './routes/folder.routes';
 import departmentRoutes from './routes/department.routes';
 import userRoutes from './routes/user.routes';
 import notificationRoutes from './routes/notification.routes';
+
+import deleteRequestRoutes from './routes/delete-request.routes';
 import activityLogRoutes from './routes/activity-log.routes';
 
 app.use('/api/auth', authRoutes);
@@ -90,6 +111,8 @@ app.use('/api/folders', folderRoutes);
 app.use('/api/departments', departmentRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/notifications', notificationRoutes);
+
+app.use('/api/delete-requests', deleteRequestRoutes);
 app.use('/api/activity-logs', activityLogRoutes);
 
 const PORT = process.env.PORT || 5000;

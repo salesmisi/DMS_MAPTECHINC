@@ -8,11 +8,12 @@ import {
   AlertTriangle } from
 'lucide-react';
 import { useDocuments } from '../context/DocumentContext';
+import { AutocompleteSearch } from '../components/AutocompleteSearch';
 import { useAuth } from '../context/AuthContext';
 export function ArchivePage() {
   const { documents, restoreDocument, permanentlyDelete, addLog } =
   useDocuments();
-  const { user } = useAuth();
+  const { user, users } = useAuth();
   const [search, setSearch] = useState('');
   const [filterDept, setFilterDept] = useState('all');
 
@@ -46,12 +47,31 @@ export function ArchivePage() {
     const matchDept = filterDept === 'all' || d.department === filterDept;
     return matchSearch && matchDept;
   });
+  const archiveSuggestions = React.useMemo(() =>
+    archived.map((d) => d.title).filter(Boolean),
+    [archived]
+  );
   const getDaysArchived = (archivedAt?: string) => {
     if (!archivedAt) return 0;
     return Math.floor(
       (Date.now() - new Date(archivedAt).getTime()) / (1000 * 60 * 60 * 24)
     );
   };
+  const departmentOptions = React.useMemo(() => {
+    const set = new Set<string>();
+    if (users && users.length) {
+      users.forEach((u: any) => {
+        const d = String(u.department || '').trim();
+        if (d) set.add(d);
+      });
+    }
+    // also include departments present on archived docs
+    archived.forEach((doc) => {
+      const d = String(doc.department || '').trim();
+      if (d) set.add(d);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  }, [users, archived]);
   const RETENTION_DAYS = 30;
   const getRetentionStatus = (doc: (typeof documents)[0]) => {
     const daysArchived = getDaysArchived(doc.archivedAt);
@@ -131,33 +151,22 @@ export function ArchivePage() {
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-2 bg-white rounded-xl px-4 py-2.5 shadow-sm border border-gray-100 flex-1 min-w-48">
-          <Search size={16} className="text-gray-400" />
-          <input
-            type="text"
-            placeholder="Search archived documents..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="bg-transparent text-sm outline-none flex-1 text-gray-700" />
-
-        </div>
+        <AutocompleteSearch
+          value={search}
+          onChange={setSearch}
+          suggestions={archiveSuggestions}
+          placeholder="Search archived documents..."
+          className="bg-white rounded-xl px-4 py-2.5 shadow-sm border border-gray-100 flex-1 min-w-48"
+        />
         <select
           value={filterDept}
           onChange={(e) => setFilterDept(e.target.value)}
           className="text-sm border border-gray-200 bg-white rounded-xl px-3 py-2.5 text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#427A43] shadow-sm">
 
           <option value="all">All Departments</option>
-          {[
-          'Accounting',
-          'Marketing',
-          'Technical Support',
-          'HR',
-          'Administration'].
-          map((d) =>
-          <option key={d} value={d}>
-              {d}
-            </option>
-          )}
+          {departmentOptions.map((d) => (
+            <option key={d} value={d}>{d}</option>
+          ))}
         </select>
       </div>
 

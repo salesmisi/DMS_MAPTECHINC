@@ -7,15 +7,18 @@ import { v4 as uuidv4 } from 'uuid';
 export const listDepartments = async (_req: AuthRequest, res: Response) => {
   try {
     const result = await pool.query('SELECT id, name, description, created_at FROM departments ORDER BY name');
-    // Map to frontend format
-    const departments = result.rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      createdAt: row.created_at,
-      manager: 'TBD',
-      description: row.description || '',
-      staffCount: 0,
-      documentCount: 0
+    // Fetch real staff and document counts per department
+    const departments = await Promise.all(result.rows.map(async (row) => {
+      const staffRes = await pool.query('SELECT COUNT(*) FROM users WHERE department = $1', [row.name]);
+      const docRes = await pool.query('SELECT COUNT(*) FROM documents WHERE department = $1', [row.name]);
+      return {
+        id: row.id,
+        name: row.name,
+        createdAt: row.created_at,
+        description: row.description || '',
+        staffCount: parseInt(staffRes.rows[0].count),
+        documentCount: parseInt(docRes.rows[0].count),
+      };
     }));
     return res.json({ departments });
   } catch (err: unknown) {
@@ -71,7 +74,7 @@ export const createDepartment = async (req: AuthRequest, res: Response) => {
           createdById = userResult.rows[0].id;
           createdByRole = userResult.rows[0].role || 'admin';
         }
-      }
+      } 
 
       await pool.query(
         `INSERT INTO folders (id, name, parent_id, department, is_department, created_by, created_by_id, created_by_role, visibility, permissions, created_at)

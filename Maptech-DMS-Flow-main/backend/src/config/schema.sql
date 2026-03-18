@@ -1,4 +1,21 @@
 -- ============================================
+-- 7. DELETE REQUESTS
+-- ============================================
+CREATE TABLE delete_requests (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  type VARCHAR(20) NOT NULL CHECK (type IN ('folder','document')),
+  target_id UUID NOT NULL,
+  requested_by UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  department VARCHAR(100),
+  status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','denied')),
+  reason TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  approved_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  approved_at TIMESTAMPTZ,
+  denied_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  denied_at TIMESTAMPTZ
+);
+-- ============================================
 -- Maptech DMS – PostgreSQL Schema
 -- ============================================
 
@@ -155,7 +172,21 @@ ALTER TABLE documents
 ADD CONSTRAINT IF NOT EXISTS uq_documents_reference UNIQUE (reference);
 
 -- ============================================
--- 8. Document counters (per-department per-year)
+-- 8. NOTIFICATION PREFERENCES
+-- ============================================
+CREATE TABLE IF NOT EXISTS notification_preferences (
+  id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id         UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+  email_enabled   BOOLEAN NOT NULL DEFAULT TRUE,
+  browser_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  approvals_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_notif_prefs_user ON notification_preferences(user_id);
+
+-- ============================================
+-- 9. Document counters (per-department per-year)
 -- ============================================
 CREATE TABLE IF NOT EXISTS document_counters (
   id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

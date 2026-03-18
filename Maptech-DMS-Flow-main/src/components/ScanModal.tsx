@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { formatDate } from '../utils/locale';
 import {
   XIcon,
   PrinterIcon,
@@ -40,7 +41,7 @@ export function ScanModal({ isOpen, onClose }: ScanModalProps) {
     }
     const newDoc = uploadDocument({
       title:
-      formData.title || `Scanned Document - ${new Date().toLocaleString()}`,
+      formData.title || `Scanned Document - ${formatDate(new Date())}`,
       department: formData.department,
       reference: formData.reference || `SCAN-${Date.now()}`,
       date: new Date().toISOString().split('T')[0],

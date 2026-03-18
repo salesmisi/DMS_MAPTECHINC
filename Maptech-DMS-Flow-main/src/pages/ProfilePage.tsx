@@ -1,14 +1,23 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Badge } from '../components/ui/Badge';
 import { User, Mail, Building, Shield, Camera, Save, Lock } from 'lucide-react';
+import { useLanguage } from '../context/LanguageContext';
+
+const API_URL = 'http://localhost:5000/api';
+
 export function ProfilePage() {
-  const { user, updateProfile } = useAuth();
+  const { user, updateProfile, changePassword, logout, refreshCurrentUser } = useAuth();
+  const { t } = useLanguage();
   const [isLoading, setIsLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
+  const [passwordMessage, setPasswordMessage] = useState('');
+  const [passwordMsgType, setPasswordMsgType] = useState<'error' | 'success' | ''>('');
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [formData, setFormData] = useState({
     name: user?.name || '',
     email: user?.email || '',
@@ -22,6 +31,38 @@ export function ProfilePage() {
       ...formData,
       [e.target.name]: e.target.value
     });
+  };
+
+  const handleAvatarClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+
+    const formPayload = new FormData();
+    formPayload.append('avatar', file);
+
+    setAvatarUploading(true);
+    try {
+      const token = localStorage.getItem('dms_token');
+      const res = await fetch(`${API_URL}/users/${user.id}/avatar`, {
+        method: 'POST',
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: formPayload,
+      });
+      if (res.ok) {
+        await refreshCurrentUser?.();
+        setSuccessMessage('Profile photo updated');
+        setTimeout(() => setSuccessMessage(''), 3000);
+      }
+    } catch (err) {
+      console.error('Avatar upload error:', err);
+    } finally {
+      setAvatarUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
   const handleProfileUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,8 +81,44 @@ export function ProfilePage() {
   };
   const handlePasswordUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Password update logic would go here
-    alert('Password update functionality would be implemented here');
+    setPasswordMessage('');
+    setPasswordMsgType('');
+    if (!formData.currentPassword || !formData.newPassword || !formData.confirmPassword) {
+      setPasswordMessage('Please fill all password fields');
+      setPasswordMsgType('error');
+      return;
+    }
+    if (formData.newPassword.length < 6) {
+      setPasswordMessage('New password must be at least 6 characters');
+      setPasswordMsgType('error');
+      return;
+    }
+    if (formData.newPassword !== formData.confirmPassword) {
+      setPasswordMessage('New password and confirm password do not match');
+      setPasswordMsgType('error');
+      return;
+    }
+
+    try {
+      const ok = await changePassword(formData.currentPassword, formData.newPassword);
+      if (ok) {
+        setPasswordMessage('Password changed — you will be logged out');
+        setPasswordMsgType('success');
+        // clear fields
+        setFormData({ ...formData, currentPassword: '', newPassword: '', confirmPassword: '' });
+        // give user a moment to see the message then logout
+        setTimeout(() => {
+          logout();
+        }, 1200);
+      } else {
+        setPasswordMessage('Failed to change password — check current password');
+        setPasswordMsgType('error');
+      }
+    } catch (err) {
+      console.error('handlePasswordUpdate error:', err);
+      setPasswordMessage('Network error — could not change password');
+      setPasswordMsgType('error');
+    }
   };
   if (!user) return null;
   return (
@@ -51,11 +128,30 @@ export function ProfilePage() {
         <div className="w-full md:w-1/3 space-y-6">
           <Card className="p-6 flex flex-col items-center text-center">
             <div className="relative mb-4 group">
-              <div className="w-32 h-32 rounded-full bg-primary/10 flex items-center justify-center text-4xl font-bold text-primary border-4 border-white shadow-lg">
-                {user.name.charAt(0).toUpperCase()}
+              <div className="w-32 h-32 rounded-full bg-primary/10 flex items-center justify-center text-4xl font-bold text-primary border-4 border-white shadow-lg overflow-hidden">
+                {user.avatar ? (
+                  <img src={`http://localhost:5000${user.avatar}`} alt="Avatar" className="w-full h-full object-cover" />
+                ) : (
+                  user.name.charAt(0).toUpperCase()
+                )}
               </div>
-              <button className="absolute bottom-0 right-0 p-2 bg-white rounded-full shadow-md border border-gray-200 hover:bg-gray-50 text-gray-600 transition-colors">
-                <Camera size={18} />
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/gif,image/webp"
+                className="hidden"
+                onChange={handleAvatarChange}
+              />
+              <button
+                onClick={handleAvatarClick}
+                disabled={avatarUploading}
+                className="absolute bottom-0 right-0 p-2 bg-white rounded-full shadow-md border border-gray-200 hover:bg-gray-50 text-gray-600 transition-colors"
+              >
+                {avatarUploading ? (
+                  <div className="w-[18px] h-[18px] border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Camera size={18} />
+                )}
               </button>
             </div>
 
@@ -98,9 +194,9 @@ export function ProfilePage() {
           <Card className="p-6">
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                <User size={20} className="text-gray-400" />
-                Profile Details
-              </h3>
+                  <User size={20} className="text-gray-400" />
+                  {t('profileDetails')}
+                </h3>
             </div>
 
             <form onSubmit={handleProfileUpdate} className="space-y-4">
@@ -162,7 +258,7 @@ export function ProfilePage() {
                   isLoading={isLoading}
                   leftIcon={<Save size={16} />}>
 
-                  Save Changes
+                  {t('savePreferences')}
                 </Button>
               </div>
             </form>
@@ -170,15 +266,24 @@ export function ProfilePage() {
 
           <Card className="p-6">
             <div className="flex items-center justify-between mb-6">
-              <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
                 <Lock size={20} className="text-gray-400" />
-                Security
+                {t('security')}
               </h3>
             </div>
 
             <form onSubmit={handlePasswordUpdate} className="space-y-4">
+                {passwordMessage && (
+                  <div className="w-full flex justify-center">
+                    <div
+                      className={`px-4 py-2 rounded text-sm ${passwordMsgType === 'error' ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}
+                    >
+                      {passwordMessage}
+                    </div>
+                  </div>
+                )}
               <Input
-                label="Current Password"
+                label={t('currentPassword')}
                 name="currentPassword"
                 type="password"
                 value={formData.currentPassword}
@@ -186,14 +291,14 @@ export function ProfilePage() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Input
-                  label="New Password"
+                  label={t('newPassword')}
                   name="newPassword"
                   type="password"
                   value={formData.newPassword}
                   onChange={handleChange} />
 
                 <Input
-                  label="Confirm New Password"
+                  label={t('confirmNewPassword')}
                   name="confirmPassword"
                   type="password"
                   value={formData.confirmPassword}
@@ -202,7 +307,7 @@ export function ProfilePage() {
               </div>
               <div className="flex justify-end pt-4">
                 <Button variant="outline" type="submit">
-                  Update Password
+                  {t('updatePassword')}
                 </Button>
               </div>
             </form>

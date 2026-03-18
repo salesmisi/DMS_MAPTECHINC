@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+import type { AuthRequest } from '../middleware/auth.middleware';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import pool from '../db';
@@ -107,6 +108,10 @@ export const createUser = async (req: Request, res: Response) => {
     if (!name || !email || !password)
       return res.status(400).json({ error: 'Name, email and password are required' });
 
+    if (!email.endsWith('@maptech.com')) {
+      return res.status(400).json({ error: 'Email address must end with @maptech.com' });
+    }
+
     // check duplicate
     const dup = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
     if (dup.rows.length > 0)
@@ -200,9 +205,37 @@ export const updateUser = async (req: Request, res: Response) => {
 export const deleteUser = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const result = await pool.query('DELETE FROM users WHERE id = $1 RETURNING id', [id]);
-    if (result.rows.length === 0)
+
+    // Check user exists
+    const userRes = await pool.query('SELECT id, name FROM users WHERE id = $1', [id]);
+    if (userRes.rows.length === 0)
       return res.status(404).json({ error: 'User not found' });
+
+    // Delete folders created by this user (skip protected department folders)
+    await pool.query(
+      'DELETE FROM folders WHERE created_by_id = $1 AND is_department = FALSE',
+      [id]
+    );
+
+    // If user is the last member of their department, delete the department folder too
+    const user = userRes.rows[0];
+    const userDeptRes = await pool.query('SELECT department FROM users WHERE id = $1', [id]);
+    const userDept = userDeptRes.rows[0]?.department;
+    if (userDept) {
+      const remaining = await pool.query(
+        'SELECT COUNT(*) FROM users WHERE department = $1 AND id != $2',
+        [userDept, id]
+      );
+      if (parseInt(remaining.rows[0].count) === 0) {
+        await pool.query(
+          'DELETE FROM folders WHERE department = $1 AND is_department = TRUE',
+          [userDept]
+        );
+      }
+    }
+
+    // Delete the user
+    await pool.query('DELETE FROM users WHERE id = $1', [id]);
 
     return res.json({ message: 'User deleted' });
   } catch (err) {
@@ -231,6 +264,69 @@ export const resetPassword = async (req: Request, res: Response) => {
     return res.json({ message: 'Password updated' });
   } catch (err) {
     console.error('resetPassword error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+};
+
+// ── CHANGE PASSWORD (requires current password) ─────────────
+export const changePassword = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword)
+      return res.status(400).json({ error: 'currentPassword and newPassword are required' });
+
+    if (newPassword.length < 6)
+      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+
+    // Only allow users to change their own password (admins can use resetPassword)
+    if (!req.userId || req.userId !== id) return res.status(403).json({ error: 'Forbidden' });
+
+    const result = await pool.query('SELECT password FROM users WHERE id = $1', [id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+
+    const user = result.rows[0];
+    const match = await bcrypt.compare(currentPassword, user.password);
+    if (!match) return res.status(401).json({ error: 'Current password is incorrect' });
+
+    const hashed = await bcrypt.hash(newPassword, 10);
+    await pool.query('UPDATE users SET password = $1 WHERE id = $2', [hashed, id]);
+
+    return res.json({ message: 'Password updated' });
+  } catch (err) {
+    console.error('changePassword error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+};
+
+// ── UPLOAD AVATAR ────────────────────────────────────────
+export const uploadAvatar = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+    const avatarPath = `/uploads/avatars/${req.file.filename}`;
+    const result = await pool.query(
+      'UPDATE users SET avatar = $1 WHERE id = $2 RETURNING id, name, email, role, department, status, avatar, created_at',
+      [avatarPath, id]
+    );
+    if (result.rows.length === 0)
+      return res.status(404).json({ error: 'User not found' });
+
+    const r = result.rows[0];
+    return res.json({
+      id: r.id,
+      name: r.name,
+      email: r.email,
+      role: r.role,
+      department: r.department,
+      status: r.status,
+      avatar: r.avatar,
+      createdAt: r.created_at,
+    });
+  } catch (err) {
+    console.error('uploadAvatar error:', err);
     return res.status(500).json({ error: 'Server error' });
   }
 };

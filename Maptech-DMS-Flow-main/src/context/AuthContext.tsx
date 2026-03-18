@@ -28,7 +28,8 @@ interface AuthContextType {
   updateUser: (id: string, updates: Partial<User>) => Promise<void>;
   updateProfile: (updates: Partial<User>) => void;
   deleteUser: (id: string) => Promise<void>;
-  resetPassword: (id: string, newPassword: string) => Promise<void>;
+  resetPassword: (id: string, newPassword: string) => Promise<boolean>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<boolean>;
   fetchUsers: () => Promise<void>;
 }
 
@@ -124,6 +125,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(data.user));
       // Notify DocumentContext to re-fetch data from backend
       window.dispatchEvent(new Event('dms-auth-change'));
+
+      // Log login activity
+      try {
+        await fetch(`${API_URL}/activity-logs`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${data.token}`,
+          },
+          body: JSON.stringify({
+            action: 'USER_LOGIN',
+            target: data.user.name,
+            targetType: 'system',
+            userName: data.user.name,
+            userRole: data.user.role,
+            details: `${data.user.name} logged in`,
+          }),
+        });
+      } catch (logErr) {
+        console.error('Failed to log login activity:', logErr);
+      }
+
       return true;
     } catch (err) {
       console.error('Login error:', err);
@@ -132,7 +155,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   // 🔹 LOGOUT
-  const logout = () => {
+  const logout = async () => {
+    // Log logout activity before clearing session
+    try {
+      const authToken = token || localStorage.getItem(TOKEN_KEY);
+      if (user && authToken) {
+        await fetch(`${API_URL}/activity-logs`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${authToken}`,
+          },
+          body: JSON.stringify({
+            action: 'USER_LOGOUT',
+            target: user.name,
+            targetType: 'system',
+            userName: user.name,
+            userRole: user.role,
+            details: `${user.name} logged out`,
+          }),
+        });
+      }
+    } catch (logErr) {
+      console.error('Failed to log logout activity:', logErr);
+    }
+
     setUser(null);
     setToken(null);
     setUsers([]);
@@ -153,15 +200,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (!res.ok) {
         const err = await res.json();
-        alert(err.error || 'Failed to create user');
-        return;
+        return { error: err.error || 'Failed to create user' };
       }
 
       const newUser = await res.json();
       setUsers((prev) => [newUser, ...prev]);
+      return { success: true };
     } catch (err) {
       console.error('addUser error:', err);
-      alert('Network error — could not create user');
+      return { error: 'Network error — could not create user' };
     }
   };
 
@@ -220,13 +267,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
 
       if (res.ok) {
-        alert('Password updated successfully');
+        return true;
       } else {
-        const err = await res.json();
-        alert(err.error || 'Failed to reset password');
+        return false;
       }
     } catch (err) {
       console.error('resetPassword error:', err);
+      return false;
+    }
+  };
+
+  // 🔹 CHANGE PASSWORD — PUT /api/users/:id/change-password
+  const changePassword = async (currentPassword: string, newPassword: string) => {
+    try {
+      if (!user) return false;
+      const res = await fetch(`${API_URL}/users/${user.id}/change-password`, {
+        method: 'PUT',
+        headers: authHeaders(token),
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+
+      if (res.ok) {
+        return true;
+      } else {
+        const err = await res.json();
+        console.error('changePassword failed:', err);
+        return false;
+      }
+    } catch (err) {
+      console.error('changePassword error:', err);
+      return false;
     }
   };
 
@@ -244,6 +314,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         updateProfile,
         deleteUser,
         resetPassword,
+        changePassword,
         fetchUsers,
         refreshCurrentUser,
       }}

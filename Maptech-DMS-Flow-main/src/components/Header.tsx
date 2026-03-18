@@ -1,63 +1,49 @@
 import React, { useState } from 'react';
-import {
-  Menu,
-  Bell,
-  Search,
-  ChevronDown,
-  User,
-  Settings,
-  LogOut,
-  FileText,
-  CheckCheck,
-  Sun,
-  Moon } from
-'lucide-react';
+import { Menu, Bell, Search, ChevronDown, User, Settings, LogOut, FileText, CheckCheck } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigation, PageName } from '../App';
 import { useDocuments } from '../context/DocumentContext';
 import { useNotifications } from '../context/NotificationContext';
 import { hasApprovalAccess } from '../utils/roles';
 import { useTheme } from '../context/ThemeContext';
+import { useLanguage } from '../context/LanguageContext';
+import { formatDateOnly } from '../utils/locale';
+import { AutocompleteSearch } from './AutocompleteSearch';
 interface HeaderProps {
   onMenuToggle: () => void;
   currentPage: PageName;
 }
-const pageTitles: Record<PageName, string> = {
-  dashboard: 'Dashboard',
-  documents: 'Document Management',
-  scanner: 'Scanner Dashboard',
-  users: 'User Management',
-  folders: 'Folder Management',
-  departments: 'Department Management',
-  archive: 'Archives',
-  trash: 'Trash',
-  'activity-log': 'Activity Log',
-  approvals: 'Pending Approvals',
-  profile: 'My Profile',
-  settings: 'Settings'
-};
+const pageTitles: Record<PageName, string> = {} as any;
 export function Header({ onMenuToggle, currentPage }: HeaderProps) {
   const { user, logout } = useAuth();
   const { navigate } = useNavigation();
   const { documents } = useDocuments();
   const { notifications: dbNotifications, unreadCount, markAsRead, markAllAsRead } = useNotifications();
   const { theme, toggleTheme } = useTheme();
+  const { t } = useLanguage();
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const isApprover = hasApprovalAccess(user);
+  const docSuggestions = React.useMemo(() =>
+    documents.filter((d) => d.status !== 'trashed' && d.status !== 'archived').map((d) => d.title).filter(Boolean),
+    [documents]
+  );
 
   // Use backend unread count for the badge
   const pendingCount = unreadCount;
 
   // Use backend notifications for the dropdown; fall back to documents if none in DB yet
-  const notifications = dbNotifications.length > 0
-    ? dbNotifications.filter((n) => !n.isRead).slice(0, 5).map((n) => ({
+      const notifications = dbNotifications.length > 0
+    ? dbNotifications.slice(0, 20).map((n) => ({
         id: n.id,
-        message: n.title,
-        time: new Date(n.createdAt).toLocaleDateString(),
+        title: n.title,
+        message: n.message,
+        time: n.createdAt,
         type: n.type,
         documentId: n.documentId,
+        createdAt: n.createdAt,
+        isRead: n.isRead,
       }))
     : isApprover
     ? documents
@@ -65,10 +51,12 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
         .slice(0, 5)
         .map((d) => ({
           id: d.id,
-          message: `"${d.title}" needs approval`,
+          title: t('approvalNeeded'),
+          message: `"${d.title}" ${t('needsApproval')}`,
           time: d.date,
           type: 'approval',
           documentId: d.id,
+          createdAt: d.date,
         }))
     : [];
   const roleColors: Record<string, string> = {
@@ -77,9 +65,9 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
     staff: '#F2E3BB'
   };
   const roleLabels: Record<string, string> = {
-    admin: 'Administrator',
-    manager: 'Department Manager',
-    staff: 'Staff'
+    admin: t('administrator'),
+    manager: t('departmentManager'),
+    staff: t('staff')
   };
   return (
     <header className="bg-white dark:bg-[#1e1e1e] border-b-2 border-[#427A43] px-4 py-3 flex items-center gap-4 z-10 flex-shrink-0">
@@ -94,37 +82,35 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
       {/* Page Title */}
       <div className="flex-1">
         <h1 className="text-lg font-semibold text-[#005F02] dark:text-[#7bc67e]">
-          {pageTitles[currentPage] || 'Dashboard'}
+          {t(`pageTitles.${currentPage}`) || 'Dashboard'}
         </h1>
         <p className="text-xs text-gray-500 dark:text-gray-400">
-          Maptech Information Solution Inc. — Document Management System
+          {t('maptechSubtitle')}
         </p>
       </div>
 
       {/* Search */}
-      <div className="hidden md:flex items-center gap-2 bg-gray-100 dark:bg-[#2a2a2a] rounded-lg px-3 py-2 w-64">
-        <Search size={16} className="text-gray-400" />
-        <input
-          type="text"
-          placeholder="Search documents..."
+      <div className="hidden md:block w-64">
+        <AutocompleteSearch
           value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && searchQuery.trim()) {
-              navigate('documents');
-            }
+          onChange={(val) => {
+            setSearchQuery(val);
+            if (val.trim()) navigate('documents');
           }}
-          className="bg-transparent text-sm outline-none flex-1 text-gray-700 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500" />
-
+          suggestions={docSuggestions}
+          placeholder={t('searchDocuments')}
+          className="bg-gray-100 dark:bg-[#2a2a2a] rounded-lg px-3 py-2"
+          inputClassName="dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500"
+        />
       </div>
 
       {/* Dark Mode Toggle */}
       <button
         onClick={toggleTheme}
         className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-gray-600 dark:text-gray-300"
-        title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}>
-        {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
+        title={theme === 'dark' ? t('switchToLightMode') : t('switchToDarkMode')}>
       </button>
+
 
       {/* Notifications */}
       <div className="relative">
@@ -134,74 +120,86 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
             setShowUserMenu(false);
           }}
           className="relative p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-gray-600 dark:text-gray-300">
-
           <Bell size={20} />
-          {isApprover && pendingCount > 0 && (
+          {unreadCount > 0 && (
             <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">
-              {pendingCount > 9 ? '9+' : pendingCount}
+              {unreadCount > 9 ? '9+' : unreadCount}
             </span>
           )}
         </button>
 
         {showNotifications && (
-          isApprover ? (
-            <div className="absolute right-0 top-full mt-2 w-80 bg-white dark:bg-[#1e1e1e] rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 z-50">
-              <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-700">
-                <h3 className="font-semibold text-gray-800 dark:text-gray-100">Notifications</h3>
-                <p className="text-xs text-gray-500 dark:text-gray-400">{pendingCount} pending approvals</p>
-              </div>
-              <div className="max-h-64 overflow-y-auto">
-                {notifications.length === 0 ? (
-                  <div className="px-4 py-6 text-center text-gray-500 dark:text-gray-400 text-sm">No new notifications</div>
-                ) : (
-                  notifications.map((n) => (
+          <div className="absolute right-0 top-full mt-2 w-80 bg-white dark:bg-[#1e1e1e] rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 z-50">
+            <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-700">
+              <h3 className="font-semibold text-gray-800 dark:text-gray-100">{t('notifications')}</h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400">{unreadCount} {t('unread')}</p>
+            </div>
+            <div className="max-h-64 overflow-y-auto">
+              {notifications.length === 0 ? (
+                <div className="px-4 py-6 text-center text-gray-500 dark:text-gray-400 text-sm">{t('noNotifications')}</div>
+              ) : (
+                notifications.map((n) => {
+                  let icon, iconBg, label, onClick;
+                  if (n.type === 'activity-log-export') {
+                    icon = <FileText size={14} className="text-orange-600" />;
+                    iconBg = 'bg-orange-100';
+                    label = t('activityLogExport');
+                    onClick = () => { navigate('activity-log'); setShowNotifications(false); };
+                  } else if (n.type === 'delete-request') {
+                    icon = <FileText size={14} className="text-red-600" />;
+                    iconBg = 'bg-red-100';
+                    label = t('deleteRequest');
+                    onClick = () => { navigate('admin-delete-requests'); setShowNotifications(false); };
+                  } else if (n.type === 'delete-approved') {
+                    icon = <CheckCheck size={14} className="text-green-600" />;
+                    iconBg = 'bg-green-100';
+                    label = t('deleteApproved');
+                    onClick = () => { setShowNotifications(false); };
+                  } else if (n.type === 'delete-denied') {
+                    icon = <FileText size={14} className="text-gray-600" />;
+                    iconBg = 'bg-gray-200';
+                    label = t('deleteDenied');
+                    onClick = () => { setShowNotifications(false); };
+                  } else {
+                    icon = <FileText size={14} className="text-yellow-600" />;
+                    iconBg = 'bg-yellow-100';
+                    label = n.type.charAt(0).toUpperCase() + n.type.slice(1);
+                    onClick = () => { setShowNotifications(false); };
+                  }
+                  return (
                     <button
                       key={n.id}
                       onClick={async () => {
-                        // Mark this notification as read in DB — badge decreases immediately
                         await markAsRead(n.id);
-                        navigate('approvals');
-                        setShowNotifications(false);
+                        onClick();
                       }}
-                      className="w-full flex items-start gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-left">
-                      <div className="w-8 h-8 rounded-full bg-yellow-100 flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <FileText size={14} className="text-yellow-600" />
+                      className={`w-full flex items-start gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-left ${n.isRead ? 'opacity-60' : 'bg-[#f0fdf4]'}`}>
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 ${iconBg}`}>
+                        {icon}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm text-gray-800 dark:text-gray-200 truncate">{n.message}</p>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{n.time}</p>
+                        <p className={`text-xs font-semibold ${n.isRead ? 'text-gray-500' : 'text-gray-700'} dark:text-gray-200`}>{label}</p>
+                        <p className={`text-sm truncate ${n.isRead ? 'text-gray-500' : 'text-gray-800 font-medium'} dark:text-gray-200`}>{n.title}</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{n.message}</p>
+                        <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{new Date(n.createdAt).toLocaleString()}</p>
                       </div>
                     </button>
-                  ))
-                )}
-              </div>
-              {notifications.length > 0 && (
-                <div className="px-4 py-2 border-t border-gray-100 dark:border-gray-700 flex items-center justify-between">
-                  <button
-                    onClick={() => {
-                      navigate('approvals');
-                      setShowNotifications(false);
-                    }}
-                    className="text-sm text-[#005F02] hover:underline font-medium">
-                    View all approvals →
-                  </button>
-                  <button
-                    onClick={async () => {
-                      await markAllAsRead();
-                    }}
-                    className="flex items-center gap-1 text-xs text-gray-500 hover:text-[#005F02] transition-colors"
-                    title="Mark all as read">
-                    <CheckCheck size={14} />
-                    Mark all read
-                  </button>
-                </div>
+                  );
+                })
               )}
             </div>
-          ) : (
-            <div className="absolute right-0 top-full mt-2 w-64 bg-white dark:bg-[#1e1e1e] rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 z-50">
-              <div className="px-4 py-6 text-center text-gray-500 dark:text-gray-400 text-sm">No approvals available</div>
-            </div>
-          )
+            {notifications.length > 0 && (
+              <div className="px-4 py-2 border-t border-gray-100 dark:border-gray-700 flex items-center justify-between">
+                <button
+                  onClick={async () => { await markAllAsRead(); }}
+                  className="flex items-center gap-1 text-xs text-gray-500 hover:text-[#005F02] transition-colors"
+                  title="Mark all as read">
+                  <CheckCheck size={14} />
+                  {t('markAllRead')}
+                </button>
+              </div>
+            )}
+          </div>
         )}
       </div>
 
@@ -215,13 +213,17 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
           className="flex items-center gap-2 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
 
           <div
-            className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
+            className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold overflow-hidden"
             style={{
-              backgroundColor: roleColors[user?.role || 'staff'],
+              backgroundColor: user?.avatar ? 'transparent' : roleColors[user?.role || 'staff'],
               color: '#005F02'
             }}>
 
-            {user?.name?.charAt(0).toUpperCase() || 'U'}
+            {user?.avatar ? (
+              <img src={`http://localhost:5000${user.avatar}`} alt="" className="w-full h-full object-cover" />
+            ) : (
+              user?.name?.charAt(0).toUpperCase() || 'U'
+            )}
           </div>
           <div className="hidden md:block text-left">
             <p className="text-sm font-medium text-gray-800 dark:text-gray-200 leading-tight">
@@ -268,7 +270,7 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
               className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
 
                 <User size={16} className="text-gray-400" />
-                My Profile
+                {t('myProfile')}
               </button>
               <button
               onClick={() => {
@@ -278,7 +280,7 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
               className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
 
                 <Settings size={16} className="text-gray-400" />
-                Settings
+                {t('settings')}
               </button>
             </div>
             <div className="border-t border-gray-100 dark:border-gray-700 py-1">
@@ -290,7 +292,7 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
               className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors">
 
                 <LogOut size={16} />
-                Sign Out
+                {t('signOut')}
               </button>
             </div>
           </div>

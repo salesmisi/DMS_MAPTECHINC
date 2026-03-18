@@ -1,11 +1,47 @@
-import React, { useState } from 'react';
-import { Activity, Download, Search, Filter, Clock } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { formatDate } from '../utils/locale';
+import { Activity, Download, Search, Filter, Clock, FileSpreadsheet, FileText, ChevronDown } from 'lucide-react';
 import { useDocuments } from '../context/DocumentContext';
+import { AutocompleteSearch } from '../components/AutocompleteSearch';
 export function ActivityLog() {
   const { activityLogs } = useDocuments();
   const [search, setSearch] = useState('');
   const [filterAction, setFilterAction] = useState('all');
   const [filterRole, setFilterRole] = useState('all');
+  const [exportOpen, setExportOpen] = useState(false);
+  const exportRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (exportRef.current && !exportRef.current.contains(e.target as Node)) {
+        setExportOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
+  const handleExport = async (format: 'excel' | 'pdf') => {
+    setExportOpen(false);
+    try {
+      const token = localStorage.getItem('dms_token');
+      const endpoint = format === 'pdf' ? 'download-pdf' : 'download';
+      const res = await fetch(`http://localhost:5000/api/activity-logs/${endpoint}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Download failed');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const ext = format === 'pdf' ? 'pdf' : 'xlsx';
+      a.download = `Activity_Logs_${new Date().toISOString().split('T')[0]}.${ext}`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Export failed:', err);
+    }
+  };
   const filtered = activityLogs.filter((log) => {
     const matchSearch =
     !search ||
@@ -17,11 +53,14 @@ export function ActivityLog() {
     const matchRole = filterRole === 'all' || log.userRole === filterRole;
     return matchSearch && matchAction && matchRole;
   });
+  const logSuggestions = React.useMemo(() =>
+    activityLogs.flatMap((log) => [log.userName, log.target]).filter(Boolean),
+    [activityLogs]
+  );
   const actionColors: Record<string, string> = {
     DOCUMENT_UPLOAD: 'bg-blue-100 text-blue-700',
     DOCUMENT_APPROVED: 'bg-green-100 text-green-700',
     DOCUMENT_REJECTED: 'bg-red-100 text-red-700',
-    DOCUMENT_VIEW: 'bg-gray-100 text-gray-600',
     DOCUMENT_DOWNLOAD: 'bg-purple-100 text-purple-700',
     DOCUMENT_ARCHIVED: 'bg-orange-100 text-orange-700',
     DOCUMENT_TRASHED: 'bg-red-100 text-red-600',
@@ -34,18 +73,11 @@ export function ActivityLog() {
     CREATE_DEPARTMENT: 'bg-blue-100 text-blue-700',
     DEPARTMENT_DELETED: 'bg-red-100 text-red-700',
     USER_LOGIN: 'bg-gray-100 text-gray-600',
+    USER_LOGOUT: 'bg-orange-100 text-orange-700',
+    USER_UPDATED: 'bg-indigo-100 text-indigo-700',
     SCAN_DOCUMENT: 'bg-cyan-100 text-cyan-700'
   };
-  const formatTimestamp = (ts: string) => {
-    const date = new Date(ts);
-    return date.toLocaleString('en-PH', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
+  const formatTimestamp = (ts: string) => formatDate(ts, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   const roleColors: Record<string, string> = {
     admin: 'bg-yellow-100 text-yellow-800',
     manager: 'bg-blue-100 text-blue-800',
@@ -69,10 +101,6 @@ export function ActivityLog() {
     label: 'Rejections'
   },
   {
-    value: 'VIEW',
-    label: 'Views'
-  },
-  {
     value: 'DOWNLOAD',
     label: 'Downloads'
   },
@@ -87,6 +115,14 @@ export function ActivityLog() {
   {
     value: 'LOGIN',
     label: 'Logins'
+  },
+  {
+    value: 'LOGOUT',
+    label: 'Logouts'
+  },
+  {
+    value: 'USER_UPDATED',
+    label: 'User Updates'
   }];
 
   return (
@@ -101,49 +137,42 @@ export function ActivityLog() {
             Complete audit trail — {activityLogs.length} entries
           </p>
         </div>
-        <button
-          onClick={() => {
-            const headers = ['Timestamp', 'User', 'Role', 'Action', 'Target', 'Target Type', 'IP Address', 'Details'];
-            const rows = filtered.map((log) => [
-              log.timestamp,
-              log.userName,
-              log.userRole,
-              log.action,
-              log.target,
-              log.targetType,
-              log.ipAddress || '',
-              log.details || ''
-            ].map((v) => '"' + String(v).replace(/"/g, '""') + '"').join(','));
-            const csv = [headers.join(','), ...rows].join('\n');
-            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'activity-log-' + new Date().toISOString().split('T')[0] + '.csv';
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            URL.revokeObjectURL(url);
-          }}
-          className="flex items-center gap-2 px-4 py-2 bg-[#C0B87A] text-[#005F02] text-sm font-semibold rounded-xl hover:bg-[#F2E3BB] transition-colors">
-
-          <Download size={16} />
-          Export CSV
-        </button>
+        <div className="relative" ref={exportRef}>
+          <button
+            onClick={() => setExportOpen(!exportOpen)}
+            className="flex items-center gap-2 px-4 py-2 bg-[#C0B87A] text-[#005F02] text-sm font-semibold rounded-xl hover:bg-[#F2E3BB] transition-colors">
+            <Download size={16} />
+            Export
+            <ChevronDown size={14} />
+          </button>
+          {exportOpen && (
+            <div className="absolute right-0 mt-2 w-44 bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden z-50">
+              <button
+                onClick={() => handleExport('excel')}
+                className="w-full flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-green-50 transition-colors">
+                <FileSpreadsheet size={16} className="text-green-600" />
+                Export as Excel
+              </button>
+              <button
+                onClick={() => handleExport('pdf')}
+                className="w-full flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-red-50 transition-colors border-t border-gray-50">
+                <FileText size={16} className="text-red-500" />
+                Export as PDF
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-2 bg-white rounded-xl px-4 py-2.5 shadow-sm border border-gray-100 flex-1 min-w-48">
-          <Search size={16} className="text-gray-400" />
-          <input
-            type="text"
-            placeholder="Search by user, action, or target..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="bg-transparent text-sm outline-none flex-1 text-gray-700" />
-
-        </div>
+        <AutocompleteSearch
+          value={search}
+          onChange={setSearch}
+          suggestions={logSuggestions}
+          placeholder="Search by user, action, or target..."
+          className="bg-white rounded-xl px-4 py-2.5 shadow-sm border border-gray-100 flex-1 min-w-48"
+        />
         <select
           value={filterAction}
           onChange={(e) => setFilterAction(e.target.value)}
