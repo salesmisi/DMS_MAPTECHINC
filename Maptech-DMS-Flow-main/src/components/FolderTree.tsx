@@ -179,16 +179,51 @@ export function FolderTree({
   const visibleFolders = React.useMemo(() => {
     if (!user) return [];
     if (user.role === 'admin') return folders;
-    return folders.filter((folder) => {
+
+    // Build a set of visible folder IDs including descendants
+    const visibleIds = new Set<string>();
+
+    // First pass: find all directly visible root/parent folders
+    const directlyVisible = folders.filter((folder) => {
       const vis = (folder as any).visibility || 'private';
-      // admin-only folders hidden from non-admins
       if (vis === 'admin-only') return false;
-      // department-scoped folders visible to users of the same department
-      if (vis === 'department') return String(folder.department || '').trim().toLowerCase() === String(user.department || '').trim().toLowerCase();
-      // private folders only visible to their creator
-      if (vis === 'private') return folder.createdById === user.id;
+      if (user.role === 'manager') {
+        return String(folder.department || '').trim().toLowerCase() === String(user.department || '').trim().toLowerCase();
+      }
+      if (user.role === 'staff') {
+        if (vis === 'department' && String(folder.department || '').trim().toLowerCase() === String(user.department || '').trim().toLowerCase()) return true;
+        if (vis === 'private' && folder.createdById === user.id) return true;
+        return false;
+      }
       return false;
     });
+
+    directlyVisible.forEach((f) => visibleIds.add(f.id));
+
+    // Second pass: recursively add all descendants of visible folders
+    const addDescendants = (parentId: string) => {
+      folders.forEach((f) => {
+        if (f.parentId === parentId && !visibleIds.has(f.id)) {
+          visibleIds.add(f.id);
+          addDescendants(f.id);
+        }
+      });
+    };
+
+    directlyVisible.forEach((f) => addDescendants(f.id));
+
+    // Third pass: add ancestors of visible folders (so tree structure is complete)
+    const addAncestors = (folderId: string) => {
+      const folder = folders.find((f) => f.id === folderId);
+      if (folder?.parentId && !visibleIds.has(folder.parentId)) {
+        visibleIds.add(folder.parentId);
+        addAncestors(folder.parentId);
+      }
+    };
+
+    directlyVisible.forEach((f) => addAncestors(f.id));
+
+    return folders.filter((f) => visibleIds.has(f.id));
   }, [folders, user]);
 
   const sortByName = (x: Folder, y: Folder) =>

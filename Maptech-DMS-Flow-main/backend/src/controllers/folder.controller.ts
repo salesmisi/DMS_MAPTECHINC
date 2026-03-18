@@ -26,13 +26,50 @@ export const listFolders = async (_req: Request, res: Response) => {
             const user = ures.rows[0];
             let visible = rows;
             if (userRole !== 'admin') {
-              visible = rows.filter((folder: any) => {
+              // Build a set of visible folder IDs including descendants
+              const visibleIds = new Set<string>();
+
+              // First pass: find all directly visible folders
+              const directlyVisible = rows.filter((folder: any) => {
                 const vis = folder.visibility || 'private';
                 if (vis === 'admin-only') return false;
-                if (vis === 'department') return String(folder.department || '').trim().toLowerCase() === String(user.department || '').trim().toLowerCase();
-                if (vis === 'private') return String(folder.created_by_id || folder.createdById || '') === String(userId);
+                if (userRole === 'manager') {
+                  return String(folder.department || '').trim().toLowerCase() === String(user.department || '').trim().toLowerCase();
+                }
+                if (userRole === 'staff') {
+                  if (vis === 'department' && String(folder.department || '').trim().toLowerCase() === String(user.department || '').trim().toLowerCase()) return true;
+                  if (vis === 'private' && String(folder.created_by_id || folder.createdById || '') === String(userId)) return true;
+                  return false;
+                }
                 return false;
               });
+
+              directlyVisible.forEach((f: any) => visibleIds.add(f.id));
+
+              // Second pass: recursively add all descendants of visible folders
+              const addDescendants = (parentId: string) => {
+                rows.forEach((f: any) => {
+                  if (f.parent_id === parentId && !visibleIds.has(f.id)) {
+                    visibleIds.add(f.id);
+                    addDescendants(f.id);
+                  }
+                });
+              };
+
+              directlyVisible.forEach((f: any) => addDescendants(f.id));
+
+              // Third pass: add ancestors of visible folders (so tree structure is complete)
+              const addAncestors = (folderId: string) => {
+                const folder = rows.find((f: any) => f.id === folderId);
+                if (folder?.parent_id && !visibleIds.has(folder.parent_id)) {
+                  visibleIds.add(folder.parent_id);
+                  addAncestors(folder.parent_id);
+                }
+              };
+
+              directlyVisible.forEach((f: any) => addAncestors(f.id));
+
+              visible = rows.filter((f: any) => visibleIds.has(f.id));
             }
             return res.json({ folders: rows, visibleFolders: visible });
           }

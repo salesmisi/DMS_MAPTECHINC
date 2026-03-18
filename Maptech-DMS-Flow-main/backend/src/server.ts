@@ -87,6 +87,23 @@ async function runMigrations() {
         archived_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
+    // Create scan_sessions table for NAPS2 integration
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS scan_sessions (
+        id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        title         VARCHAR(255) NOT NULL,
+        format        VARCHAR(20) NOT NULL DEFAULT 'pdf',
+        folder_id     UUID REFERENCES folders(id) ON DELETE SET NULL,
+        user_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        user_name     VARCHAR(150) NOT NULL,
+        department    VARCHAR(100),
+        status        VARCHAR(20) NOT NULL DEFAULT 'pending',
+        document_id   UUID REFERENCES documents(id) ON DELETE SET NULL,
+        error_message TEXT,
+        created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        completed_at  TIMESTAMPTZ
+      )
+    `);
     console.log('Migrations applied successfully');
   } catch (e: any) {
     console.warn('Migration warning:', e?.message || e);
@@ -104,6 +121,8 @@ import notificationRoutes from './routes/notification.routes';
 
 import deleteRequestRoutes from './routes/delete-request.routes';
 import activityLogRoutes from './routes/activity-log.routes';
+import scannerRoutes from './routes/scanner.routes';
+import scanWatcher from './services/scanWatcher.service';
 
 app.use('/api/auth', authRoutes);
 app.use('/api/documents', documentRoutes);
@@ -114,11 +133,14 @@ app.use('/api/notifications', notificationRoutes);
 
 app.use('/api/delete-requests', deleteRequestRoutes);
 app.use('/api/activity-logs', activityLogRoutes);
+app.use('/api/scanner', scannerRoutes);
 
 const PORT = process.env.PORT || 5000;
 
 connectDB().then(async () => {
   await runMigrations();
+  // Start the scan file watcher
+  scanWatcher.startScanWatcher();
   app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 });
 
