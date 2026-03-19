@@ -78,6 +78,7 @@ interface DocumentContextType {
   addLog: (log: Omit<ActivityLog, 'id'>) => void;
   uploadNewVersion: (id: string, uploadedBy: string) => void;
   refreshDocuments: () => Promise<void>;
+  refreshLogs: () => Promise<void>;
 }
 
 const DocumentContext = createContext<DocumentContextType>(
@@ -515,7 +516,8 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         deleteFolder,
         addLog,
         uploadNewVersion,
-        refreshDocuments: fetchDocuments
+        refreshDocuments: fetchDocuments,
+        refreshLogs: fetchActivityLogs
       }}
     >
       {children}

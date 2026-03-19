@@ -109,7 +109,8 @@ const detectWindowsScanners = (): Promise<Array<{ id: string; name: string; type
         }
 
         // Check for multifunction printers (MFPs) connected via USB
-        const printerCommand = `powershell -Command "Get-WmiObject -Class Win32_Printer | Select-Object Name, PortName, PrinterStatus, Local | ConvertTo-Json"`;
+        // Include WorkOffline property to check if printer is actually available
+        const printerCommand = `powershell -Command "Get-WmiObject -Class Win32_Printer | Select-Object Name, PortName, PrinterStatus, Local, WorkOffline, PrinterState | ConvertTo-Json"`;
 
         exec(printerCommand, { timeout: 15000 }, (printerError, printerStdout) => {
           if (!printerError && printerStdout.trim()) {
@@ -121,13 +122,27 @@ const detectWindowsScanners = (): Promise<Array<{ id: string; name: string; type
                   const exists = devices.some(d => d.name.toLowerCase() === printer.Name.toLowerCase());
                   // Check if it's a USB printer (Local=True and USB port)
                   const isUsb = printer.Local && (printer.PortName?.includes('USB') || printer.PortName?.startsWith('USB'));
-                  // Include all local printers as they might have scan capability
-                  if (!exists && printer.Local) {
+
+                  // Skip virtual printers (Microsoft XPS, PDF, OneNote, Fax)
+                  const isVirtualPrinter = /Microsoft (XPS|Print to PDF)|OneNote|Fax/i.test(printer.Name);
+
+                  // Determine actual printer status
+                  // WorkOffline = true means printer is set to offline mode
+                  // PrinterStatus: 0=Other, 1=Unknown, 2=Idle, 3=Printing, 4=Warmup, 5=Stopped, 6=Offline, 7=Paused
+                  // PrinterState: 0=Ready, other values indicate various error/offline states
+                  const isOffline = printer.WorkOffline === true ||
+                                    printer.PrinterStatus === 6 ||
+                                    printer.PrinterStatus === 5 ||
+                                    printer.PrinterStatus === 7;
+                  const isReady = !isOffline && (printer.PrinterStatus === 0 || printer.PrinterStatus === 2 || printer.PrinterStatus === 3 || printer.PrinterStatus === 4);
+
+                  // Include all local printers as they might have scan capability (except virtual printers)
+                  if (!exists && printer.Local && !isVirtualPrinter) {
                     devices.push({
                       id: `mfp-${index}`,
                       name: printer.Name,
                       type: 'multifunction',
-                      status: printer.PrinterStatus === 3 || printer.PrinterStatus === 0 ? 'ready' : 'offline',
+                      status: isReady ? 'ready' : 'offline',
                       connection: isUsb ? 'USB' : 'Local'
                     });
                   }

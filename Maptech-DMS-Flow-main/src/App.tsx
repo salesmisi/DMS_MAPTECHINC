@@ -53,7 +53,7 @@ export function useNavigation() {
 }
 function AppContent() {
   const { user } = useAuth();
-  const { createNotification } = useNotifications();
+  const { createNotification, deleteNotificationsByType } = useNotifications();
   const [currentPage, setCurrentPage] = useState<PageName>('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
@@ -163,10 +163,12 @@ function AppContent() {
               });
             }
           }}
-          onExported={() => {
+          onExported={async () => {
             setShowExportPopup(false);
             setDismissed(false);
             setLogCount(0);
+            // Delete any activity-log-export notifications
+            await deleteNotificationsByType('activity-log-export');
             checkLogCount();
           }}
         />

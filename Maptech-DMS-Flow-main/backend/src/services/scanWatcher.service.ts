@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import pool from '../db';
 import { v4 as uuidv4 } from 'uuid';
+import { processScannedImage } from './imageProcessing.service';
 
 // Store pending scan sessions waiting for files
 interface PendingScan {
@@ -155,19 +156,56 @@ async function processScannedFile(filePath: string): Promise<void> {
   }
 
   try {
+    // Apply image processing (edge detection, cropping, enhancement) for image files
+    let processedFilePath = filePath;
+    const isImageFile = ['.jpg', '.jpeg', '.png', '.tiff', '.tif'].includes(`.${ext}`);
+
+    if (isImageFile) {
+      console.log(`Processing image with OpenCV: ${fileName}`);
+      const processedPath = filePath.replace(/(\.[^.]+)$/, '_processed$1');
+
+      try {
+        // Add timeout to prevent hanging
+        const processWithTimeout = async () => {
+          const timeoutPromise = new Promise<{ success: false; message: string }>((resolve) => {
+            setTimeout(() => resolve({ success: false, message: 'Image processing timed out' }), 10000);
+          });
+
+          const processPromise = processScannedImage(filePath, {
+            autoCrop: true,
+            enhance: true,
+            outputPath: processedPath
+          });
+
+          return Promise.race([processPromise, timeoutPromise]);
+        };
+
+        const processResult = await processWithTimeout();
+
+        if (processResult.success && processResult.outputPath) {
+          processedFilePath = processResult.outputPath;
+          console.log(`Image processed successfully: ${processResult.outputPath}`);
+        } else {
+          console.log(`Image processing skipped: ${processResult.message || 'using original file'}`);
+        }
+      } catch (processingError: any) {
+        console.log(`Image processing error: ${processingError.message || 'unknown error'}, using original file`);
+      }
+    }
+
     if (pendingScan.batchId) {
       const batch = getMultiPageBatch(pendingScan.batchId);
       if (!batch) {
         throw new Error(`Multi-page batch not found: ${pendingScan.batchId}`);
       }
 
-      const sourceStat = fs.statSync(filePath);
+      const sourceStat = fs.statSync(processedFilePath);
       const pageNumber = pendingScan.pageNumber || batch.pages.length + 1;
       const batchDir = ensureBatchDir(batch.batchId);
       const pageFileName = `page_${String(pageNumber).padStart(3, '0')}_${Date.now()}.${ext || 'pdf'}`;
       const batchFilePath = path.join(batchDir, pageFileName);
 
-      fs.copyFileSync(filePath, batchFilePath);
+      fs.copyFileSync(processedFilePath, batchFilePath);
 
       batch.pages.push({
         sessionId: pendingScan.sessionId,
@@ -190,6 +228,9 @@ async function processScannedFile(filePath: string): Promise<void> {
 
       try {
         fs.unlinkSync(filePath);
+        if (processedFilePath !== filePath && fs.existsSync(processedFilePath)) {
+          fs.unlinkSync(processedFilePath);
+        }
       } catch (e) {
         console.log(`Could not delete original scan file: ${filePath}`);
       }
@@ -198,9 +239,9 @@ async function processScannedFile(filePath: string): Promise<void> {
       return;
     }
 
-    // Read file content
-    const fileBuffer = fs.readFileSync(filePath);
-    const fileSize = fs.statSync(filePath).size;
+    // Read file content (use processed file if available)
+    const fileBuffer = fs.readFileSync(processedFilePath);
+    const fileSize = fs.statSync(processedFilePath).size;
     const fileSizeStr = `${(fileSize / 1024 / 1024).toFixed(1)} MB`;
 
     // Generate new filename based on document title
@@ -209,8 +250,8 @@ async function processScannedFile(filePath: string): Promise<void> {
     const newFileName = `${sanitizedTitle}_${timestamp}.${ext}`;
     const newFilePath = path.join(process.cwd(), 'uploads', newFileName);
 
-    // Copy file to uploads directory
-    fs.copyFileSync(filePath, newFilePath);
+    // Copy processed file to uploads directory
+    fs.copyFileSync(processedFilePath, newFilePath);
 
     // Generate unique reference number with retry logic
     const year = new Date().getFullYear();
@@ -322,9 +363,12 @@ async function processScannedFile(filePath: string): Promise<void> {
     // Remove from pending scans
     removePendingScan(pendingScan.sessionId);
 
-    // Optionally delete original file from scans folder
+    // Optionally delete original and processed files from scans folder
     try {
       fs.unlinkSync(filePath);
+      if (processedFilePath !== filePath && fs.existsSync(processedFilePath)) {
+        fs.unlinkSync(processedFilePath);
+      }
     } catch (e) {
       console.log(`Could not delete original scan file: ${filePath}`);
     }

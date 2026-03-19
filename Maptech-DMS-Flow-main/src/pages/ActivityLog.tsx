@@ -3,8 +3,10 @@ import { formatDate } from '../utils/locale';
 import { Activity, Download, Search, Filter, Clock, FileSpreadsheet, FileText, ChevronDown } from 'lucide-react';
 import { useDocuments } from '../context/DocumentContext';
 import { AutocompleteSearch } from '../components/AutocompleteSearch';
+import { useNotifications } from '../context/NotificationContext';
 export function ActivityLog() {
-  const { activityLogs } = useDocuments();
+  const { activityLogs, refreshLogs } = useDocuments();
+  const { deleteNotificationsByType } = useNotifications();
   const [search, setSearch] = useState('');
   const [filterAction, setFilterAction] = useState('all');
   const [filterRole, setFilterRole] = useState('all');
@@ -38,6 +40,20 @@ export function ActivityLog() {
       a.download = `Activity_Logs_${new Date().toISOString().split('T')[0]}.${ext}`;
       a.click();
       URL.revokeObjectURL(url);
+
+      // After successful download, archive the logs
+      await fetch('http://localhost:5000/api/activity-logs/download-and-archive', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      // Delete any activity-log-export notifications
+      await deleteNotificationsByType('activity-log-export');
+
+      // Refresh the logs to show cleared state
+      if (refreshLogs) {
+        await refreshLogs();
+      }
     } catch (err) {
       console.error('Export failed:', err);
     }

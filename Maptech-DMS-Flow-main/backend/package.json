@@ -24,6 +24,7 @@
     "jsonwebtoken": "^9.0.3",
     "mammoth": "^1.11.0",
     "multer": "^2.1.0",
+    "opencv-wasm": "^4.3.0-10",
     "pdf-lib": "^1.17.1",
     "pdfkit": "^0.18.0",
     "pg": "^8.19.0",

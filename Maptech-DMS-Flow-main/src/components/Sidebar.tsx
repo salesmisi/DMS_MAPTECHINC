@@ -160,16 +160,34 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
 
       {/* Logo / Brand */}
        <div className="flex items-center justify-center p-6 border-b border-[#0f3d0f]">
-        {isOpen && (
-       <img
-          src="/maptechlogo.png"
-          alt="Maptech Logo"
-          className="w-13 h-auto object-contain"/>
-      )}
+        {isOpen ? (
+          <button
+            onClick={() => navigate('dashboard')}
+            className="cursor-pointer hover:opacity-80 transition-opacity"
+            title="Go to Dashboard"
+          >
+            <img
+              src="/maptechlogo.png"
+              alt="Maptech Logo"
+              className="w-13 h-auto object-contain"/>
+          </button>
+        ) : (
+          <button
+            onClick={() => navigate('dashboard')}
+            className="cursor-pointer hover:opacity-80 transition-opacity"
+            title="Go to Dashboard"
+          >
+            <LayoutDashboard size={24} className="text-[#C0B87A]" />
+          </button>
+        )}
     </div>
         {/* User Info */}
         {isOpen && user &&
-        <div className="px-4 py-3 border-b border-[#cad4ca]">
+        <button
+            onClick={() => navigate('profile')}
+            className="w-full px-4 py-3 border-b border-[#cad4ca] hover:bg-[#0a2535] transition-colors cursor-pointer text-left"
+            title="Go to My Profile"
+          >
             <div className="flex items-center gap-3">
               <div
               className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 overflow-hidden"
@@ -199,7 +217,7 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
                 <span>{t('fullAccess')}</span>
               </div>
           }
-          </div>
+          </button>
         }
 
         {/* Navigation */}

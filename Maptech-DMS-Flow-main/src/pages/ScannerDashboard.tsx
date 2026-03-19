@@ -14,7 +14,8 @@ import {
   Download,
   Loader2,
   Printer,
-  Usb
+  Usb,
+  HelpCircle
 } from 'lucide-react';
 import { useDocuments } from '../context/DocumentContext';
 import { formatDate } from '../utils/locale';
@@ -73,7 +74,7 @@ export function ScannerDashboard() {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [scanComplete, setScanComplete] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
-  const [multiPageMode, setMultiPageMode] = useState(true);
+  const [multiPageMode, setMultiPageMode] = useState(false);
   const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
   const [scannedPages, setScannedPages] = useState(0);
   const [finalizingBatch, setFinalizingBatch] = useState(false);
@@ -84,6 +85,7 @@ export function ScannerDashboard() {
     directory: string;
     pendingScans: number;
   } | null>(null);
+  const [showHelpTooltip, setShowHelpTooltip] = useState(false);
 
   const API_BASE = 'http://localhost:5000/api';
 
@@ -652,11 +654,13 @@ export function ScannerDashboard() {
                             USB
                           </span>
                         )}
-                        <span className="text-xs text-gray-500 capitalize">{scanner.status}</span>
+                        <span className={`text-xs ${scanner.status === 'ready' ? 'text-green-600' : 'text-amber-600'}`}>
+                          {scanner.status === 'ready' ? 'Ready' : 'Not Ready'}
+                        </span>
                       </div>
                     </div>
                     <div className={`w-2 h-2 rounded-full ${
-                      scanner.status === 'ready' ? 'bg-green-500' : 'bg-gray-300'
+                      scanner.status === 'ready' ? 'bg-green-500' : 'bg-amber-400'
                     }`} />
                   </label>
                 ))}
@@ -677,9 +681,77 @@ export function ScannerDashboard() {
 
             <div className="space-y-4">
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1.5">
-                  Document Title *
-                </label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-medium text-gray-600">
+                    Document Title *
+                  </label>
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setShowHelpTooltip(!showHelpTooltip)}
+                      onMouseEnter={() => setShowHelpTooltip(true)}
+                      onMouseLeave={() => setShowHelpTooltip(false)}
+                      className="text-gray-400 hover:text-[#427A43] transition-colors"
+                    >
+                      <HelpCircle size={14} />
+                    </button>
+                    {showHelpTooltip && (
+                      <div className="absolute right-0 top-6 z-50 w-64 bg-white rounded-xl shadow-lg border border-gray-100 p-4 animate-in fade-in duration-200">
+                        <div className="flex items-center gap-2 mb-3">
+                          <div className="w-6 h-6 rounded-full bg-[#427A43]/10 flex items-center justify-center">
+                            <HelpCircle size={14} className="text-[#427A43]" />
+                          </div>
+                          <h4 className="text-sm font-semibold text-gray-800">Document Type Codes</h4>
+                        </div>
+                        <div className="space-y-2">
+                          <div className="flex items-start gap-2">
+                            <span className="text-xs font-bold text-[#005F02] bg-green-50 px-2 py-0.5 rounded">SI</span>
+                            <span className="text-xs text-gray-600">Service or Sales Invoice</span>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <span className="text-xs font-bold text-[#005F02] bg-green-50 px-2 py-0.5 rounded">LIQ</span>
+                            <span className="text-xs text-gray-600">Liquidation</span>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <span className="text-xs font-bold text-[#005F02] bg-green-50 px-2 py-0.5 rounded">REIM</span>
+                            <span className="text-xs text-gray-600">Reimbursement</span>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <span className="text-xs font-bold text-[#005F02] bg-green-50 px-2 py-0.5 rounded">PRF</span>
+                            <span className="text-xs text-gray-600">Purchase Requisition Form</span>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <span className="text-xs font-bold text-[#005F02] bg-green-50 px-2 py-0.5 rounded">RECP</span>
+                            <span className="text-xs text-gray-600">Receipt</span>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <span className="text-xs font-bold text-[#005F02] bg-green-50 px-2 py-0.5 rounded">OR</span>
+                            <span className="text-xs text-gray-600">Official Receipt</span>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <span className="text-xs font-bold text-[#005F02] bg-green-50 px-2 py-0.5 rounded">CV</span>
+                            <span className="text-xs text-gray-600">Check Voucher</span>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <span className="text-xs font-bold text-[#005F02] bg-green-50 px-2 py-0.5 rounded">PO</span>
+                            <span className="text-xs text-gray-600">Purchase Order</span>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <span className="text-xs font-bold text-[#005F02] bg-green-50 px-2 py-0.5 rounded">CR</span>
+                            <span className="text-xs text-gray-600">Collection Receipt / Cash Receipt</span>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <span className="text-xs font-bold text-[#005F02] bg-green-50 px-2 py-0.5 rounded">DR</span>
+                            <span className="text-xs text-gray-600">Delivery Receipt</span>
+                          </div>
+                        </div>
+                        <div className="mt-3 pt-2 border-t border-gray-100">
+                          <p className="text-[10px] text-red-500">If no Reference No. is specified, replace it with one of the following types</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
                 <input
                   type="text"
                   value={docTitle}
@@ -687,7 +759,7 @@ export function ScannerDashboard() {
                     setDocTitle(e.target.value);
                     setScanError(null);
                   }}
-                  placeholder="Enter document title..."
+                  placeholder="COMPANY_₱ 00.00_DATE (MAR19,2026)_REF NO.(SI_LIQ_REIM_PRF)"
                   disabled={scanning || (activeBatchId !== null && scannedPages > 0)}
                   className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#427A43] disabled:bg-gray-50"
                 />
@@ -937,13 +1009,17 @@ export function ScannerDashboard() {
                             <span className={`text-xs px-2 py-0.5 rounded-full ${
                               scan.status === 'completed'
                                 ? 'bg-green-100 text-green-700'
-                                : scan.status === 'pending' || scan.status === 'scanning'
+                                : scan.status === 'scanning'
                                 ? 'bg-blue-100 text-blue-700'
-                                : scan.status === 'failed'
+                                : scan.status === 'failed' || scan.status === 'pending'
                                 ? 'bg-red-100 text-red-700'
                                 : 'bg-gray-100 text-gray-600'
                             }`}>
-                              {scan.status}
+                              {scan.status === 'completed' ? 'Completed'
+                                : scan.status === 'scanning' ? 'Scanning...'
+                                : scan.status === 'pending' ? 'Failed - Try Again'
+                                : scan.status === 'failed' ? 'Failed'
+                                : scan.status}
                             </span>
                             {scan.reference && (
                               <span className="text-xs text-gray-500 font-mono">

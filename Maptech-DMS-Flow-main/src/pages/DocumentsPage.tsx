@@ -46,17 +46,29 @@ interface FolderTreeItemProps {
 function FolderTreeItem({ folder, selectedFolder, selectFolder, getChildren, onCreateSubfolder, level }: FolderTreeItemProps) {
   const [expanded, setExpanded] = React.useState(level < 2);
   const [deleteModal, setDeleteModal] = React.useState(false);
+  const [requestDeleteModal, setRequestDeleteModal] = React.useState(false);
   const { deleteFolder, folders } = useDocuments();
   const { user, users } = useAuth();
   const children = getChildren(folder.id);
   const hasChildren = children.length > 0;
   const isSelected = selectedFolder === folder.id;
   const depth = Math.min(level, DT_MAX);
-  // Find the full folder object to check isDepartment
+  // Find the full folder object to check isDepartment and createdByRole
   const fullFolder = folders.find(f => f.id === folder.id) || (folder as any);
   const isDepartment = fullFolder.isDepartment || fullFolder.is_department;
-  // Only admin can delete/rename department folders
-  const canDelete = !isDepartment || (user && user.role === 'admin');
+  const isAdminCreated = fullFolder.createdByRole === 'admin';
+  const isOwnFolder = fullFolder.createdById === user?.id;
+
+  // Lock icon shows for department folders OR admin-created folders
+  const showLock = isDepartment || isAdminCreated;
+
+  // Determine delete permissions:
+  // - Admin can delete any folder
+  // - Manager/Staff can only delete their own folders (not admin-created or department folders)
+  // - Staff needs to request deletion
+  const canDirectDelete = user?.role === 'admin' || (isOwnFolder && !isAdminCreated && !isDepartment && user?.role === 'manager');
+  const canRequestDelete = user?.role === 'staff' && isOwnFolder && !isAdminCreated && !isDepartment;
+  const showDeleteButton = canDirectDelete || canRequestDelete;
 
   return (
     <div className="ft-node">
@@ -85,8 +97,8 @@ function FolderTreeItem({ folder, selectedFolder, selectFolder, getChildren, onC
         >
           <FolderOpen size={14} className="ft-icon" />
           <span className="ft-label" title={folder.name}>{folder.name}</span>
-          {isDepartment && (
-            <span className="ml-2 text-xs text-gray-400 flex items-center" title="Department Folder — protected">
+          {showLock && (
+            <span className="ml-2 text-xs text-gray-400 flex items-center" title={isDepartment ? "Department Folder — protected" : "Admin Created — protected"}>
               <Lock size={12} />
             </span>
           )}
@@ -101,13 +113,20 @@ function FolderTreeItem({ folder, selectedFolder, selectFolder, getChildren, onC
         >
           <Plus size={12} />
         </button>
-        {canDelete && (
+        {showDeleteButton && (
           <button
-            onClick={(e) => { e.stopPropagation(); setDeleteModal(true); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (canRequestDelete) {
+                setRequestDeleteModal(true);
+              } else {
+                setDeleteModal(true);
+              }
+            }}
             className={`ft-action ${
-              isSelected ? 'hover:bg-white/20 text-white' : 'hover:bg-red-100 text-red-400'
+              isSelected ? 'hover:bg-white/20 text-white' : canRequestDelete ? 'hover:bg-orange-100 text-orange-400' : 'hover:bg-red-100 text-red-400'
             }`}
-            title="Delete folder"
+            title={canRequestDelete ? "Request folder deletion" : "Delete folder"}
           >
             <Trash2 size={12} />
           </button>
@@ -133,6 +152,58 @@ function FolderTreeItem({ folder, selectedFolder, selectFolder, getChildren, onC
           }}
           onCancel={() => setDeleteModal(false)}
         />
+      )}
+
+      {/* Request Delete Modal for Staff */}
+      {requestDeleteModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setRequestDeleteModal(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+            <div className="p-6">
+              <div className="flex items-start gap-4">
+                <div className="p-2 bg-orange-50 rounded-xl flex-shrink-0">
+                  <Trash2 size={22} className="text-orange-500" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-gray-800 text-base">Request Folder Deletion</h3>
+                  <p className="text-sm text-gray-500 mt-1">
+                    Request to delete <span className="font-medium text-gray-700">"{folder.name}"</span>?
+                    {hasChildren && (
+                      <span className="block text-orange-600 mt-1">
+                        This folder contains {children.length} subfolder(s).
+                      </span>
+                    )}
+                  </p>
+                  <p className="text-xs text-gray-400 mt-2">
+                    Your request will be sent to an admin for approval.
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="px-6 pb-6 flex gap-3">
+              <button
+                onClick={() => setRequestDeleteModal(false)}
+                className="flex-1 py-2.5 border border-gray-300 text-gray-600 text-sm font-medium rounded-xl hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  const res = await deleteFolder(folder.id);
+                  if (res && res.status === 202) {
+                    alert(res.message || 'Delete request submitted for admin approval');
+                  } else if (res && !res.ok) {
+                    alert(res.error || 'Failed to submit delete request');
+                  }
+                  setRequestDeleteModal(false);
+                }}
+                className="flex-1 py-2.5 bg-orange-500 text-white text-sm font-semibold rounded-xl hover:bg-orange-600 transition-colors flex items-center justify-center gap-2"
+              >
+                <Trash2 size={14} />
+                Request Delete
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {expanded && hasChildren && (
@@ -282,11 +353,28 @@ export function DocumentsPage() {
            inVisibleFolder;
   };
 
+  // Helper function to check if a folder or its ancestors match the search
+  const folderMatchesSearch = (folderId: string | null, searchTerm: string): boolean => {
+    if (!folderId || !searchTerm) return false;
+    const folder = visibleFolders.find(f => f.id === folderId);
+    if (!folder) return false;
+    if (folder.name.toLowerCase().includes(searchTerm)) return true;
+    // Check parent folders recursively
+    if (folder.parentId) return folderMatchesSearch(folder.parentId, searchTerm);
+    return false;
+  };
+
   const filtered = activeDocuments.filter((doc) => {
-    const matchSearch =
+    const searchLower = search.toLowerCase();
+    const matchDocSearch =
     !search ||
-    doc.title.toLowerCase().includes(search.toLowerCase()) ||
-    doc.reference.toLowerCase().includes(search.toLowerCase());
+    doc.title.toLowerCase().includes(searchLower) ||
+    doc.reference.toLowerCase().includes(searchLower);
+
+    // Also match if document is in a folder (or subfolder) that matches the search
+    const matchFolderSearch = !search || folderMatchesSearch(doc.folderId, searchLower);
+
+    const matchSearch = matchDocSearch || matchFolderSearch;
     const matchDept = filterDept === 'all' || doc.department === filterDept;
     const matchStatus = filterStatus === 'all' || doc.status === filterStatus;
     const matchType = filterType === 'all' || doc.fileType === filterType;
@@ -309,10 +397,21 @@ export function DocumentsPage() {
     sessionStorage.removeItem('dms_preview_doc_id');
   }, [activeDocuments, selectFolder]);
 
-  const searchSuggestions = React.useMemo(() =>
-    activeDocuments.filter(d => hasDocumentAccess(d)).flatMap((d) => [d.title, d.reference]).filter(Boolean),
-    [activeDocuments, user]
-  );
+  const searchSuggestions = React.useMemo(() => {
+    const docSuggestions = activeDocuments.filter(d => hasDocumentAccess(d)).flatMap((d) => [d.title, d.reference]).filter(Boolean);
+    const folderSuggestions = visibleFolders.map((f) => f.name).filter(Boolean);
+    return [...new Set([...docSuggestions, ...folderSuggestions])];
+  }, [activeDocuments, user, visibleFolders]);
+
+  // Check if search matches a folder and auto-select it
+  React.useEffect(() => {
+    if (!search) return;
+    const searchLower = search.toLowerCase();
+    const matchedFolder = visibleFolders.find((f) => f.name.toLowerCase() === searchLower);
+    if (matchedFolder && selectFolder) {
+      selectFolder(matchedFolder.id);
+    }
+  }, [search, visibleFolders, selectFolder]);
   const rootFolders = visibleFolders.filter((f) => f.parentId === null);
   const getChildren = (parentId: string) => visibleFolders.filter((f) => f.parentId === parentId);
   const statusBadge = (status: string) => {
@@ -664,7 +763,7 @@ export function DocumentsPage() {
                         <span
                     className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusBadge(doc.status)}`}>
 
-                          {doc.status}
+                          {doc.status === 'approved' ? (doc.scannedFrom ? 'Success' : 'Approved') : doc.status}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-gray-500 hidden lg:table-cell">
@@ -734,7 +833,7 @@ export function DocumentsPage() {
                   <span
                 className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusBadge(doc.status)}`}>
 
-                    {doc.status}
+                    {doc.status === 'approved' ? (doc.scannedFrom ? 'Success' : 'Approved') : doc.status}
                   </span>
                 </div>
                 <h4 className="font-medium text-gray-800 text-sm mb-1 line-clamp-2">
