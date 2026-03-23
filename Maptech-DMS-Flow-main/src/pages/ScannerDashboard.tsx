@@ -67,6 +67,13 @@ export function ScannerDashboard() {
   const [destFolder, setDestFolder] = useState('');
   const [docTitle, setDocTitle] = useState('');
 
+  // Scan quality settings
+  const [scanDpi, setScanDpi] = useState<number>(300);
+  const [colorMode, setColorMode] = useState<string>('color');
+  const [paperSize, setPaperSize] = useState<string>('letter');
+  // scanSource: 'auto', 'glass', 'feeder'
+  const [scanSource, setScanSource] = useState<string>('auto');
+
   const [recentScans, setRecentScans] = useState<ScanSession[]>([]);
   const [lastScannedDoc, setLastScannedDoc] = useState<LastScannedDoc | null>(null);
 
@@ -318,6 +325,19 @@ export function ScannerDashboard() {
       return;
     }
 
+
+    // Auto-switch to ADF if Legal is selected and scanSource is not feeder
+    if (paperSize === 'legal' && scanSource !== 'feeder') {
+      setScanSource('feeder');
+      setScanError('Legal size scanning requires the document feeder (ADF). Scan source switched to ADF.');
+      return;
+    }
+    // Prevent scan if user tries to force Flatbed for Legal
+    if (paperSize === 'legal' && scanSource === 'glass') {
+      setScanError('Legal size scanning requires the document feeder (ADF). Please select ADF as the scan source.');
+      return;
+    }
+
     setScanError(null);
     setScanning(true);
     setScanComplete(false);
@@ -345,7 +365,11 @@ export function ScannerDashboard() {
           scannerName: scannerName,
           multiPage: isMultiPageScan,
           batchId: activeBatchId,
-          pageNumber: scannedPages + 1
+          pageNumber: scannedPages + 1,
+          dpi: scanDpi,
+          colorMode: colorMode,
+          paperSize: paperSize,
+          scanSource: scanSource
         })
       });
 
@@ -822,6 +846,73 @@ export function ScannerDashboard() {
                         {f.name}
                       </option>
                     ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Scan Quality Settings */}
+              <div className="grid grid-cols-4 gap-4">
+                                <div>
+                                  <label className="block text-xs font-medium text-gray-600 mb-1.5">
+                                    Scan Source
+                                  </label>
+                                  <select
+                                    value={scanSource}
+                                    onChange={(e) => setScanSource(e.target.value)}
+                                    disabled={scanning}
+                                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm disabled:bg-gray-50"
+                                  >
+                                    <option value="auto">Auto Detect</option>
+                                    <option value="glass">Flatbed (Glass)</option>
+                                    <option value="feeder">ADF (Document Feeder)</option>
+                                  </select>
+                                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1.5">
+                    Resolution (DPI)
+                  </label>
+                  <select
+                    value={scanDpi}
+                    onChange={(e) => setScanDpi(Number(e.target.value))}
+                    disabled={scanning}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm disabled:bg-gray-50"
+                  >
+                    <option value={150}>150 DPI (Fast)</option>
+                    <option value={200}>200 DPI (Draft)</option>
+                    <option value={300}>300 DPI (Standard)</option>
+                    <option value={600}>600 DPI (High)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1.5">
+                    Color Mode
+                  </label>
+                  <select
+                    value={colorMode}
+                    onChange={(e) => setColorMode(e.target.value)}
+                    disabled={scanning}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm disabled:bg-gray-50"
+                  >
+                    <option value="color">Color</option>
+                    <option value="gray">Grayscale</option>
+                    <option value="bw">Black & White</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1.5">
+                    Paper Size
+                  </label>
+                  <select
+                    value={paperSize}
+                    onChange={(e) => setPaperSize(e.target.value)}
+                    disabled={scanning}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm disabled:bg-gray-50"
+                  >
+                    <option value="letter">Letter (8.5 x 11")</option>
+                    <option value="a4">A4 (8.27 x 11.69")</option>
+                    <option value="legal">Legal (8.5 x 14")</option>
                   </select>
                 </div>
               </div>

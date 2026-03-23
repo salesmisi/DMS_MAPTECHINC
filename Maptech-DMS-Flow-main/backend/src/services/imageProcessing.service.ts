@@ -424,9 +424,58 @@ export async function processScannedImage(
   }
 }
 
+// Fast processing mode for performance optimization
+export async function processScannedImageFast(
+  imagePath: string,
+  options: {
+    outputPath?: string;
+  } = {}
+): Promise<CropResult> {
+  try {
+    const { outputPath } = options;
+
+    // Generate output path if not provided
+    let finalOutputPath = outputPath;
+    if (!finalOutputPath) {
+      const parsed = path.parse(imagePath);
+      finalOutputPath = path.join(parsed.dir, `${parsed.name}_processed${parsed.ext}`);
+    }
+
+    // Fast processing using only sharp (no OpenCV for speed)
+    await sharp(imagePath)
+      .normalize() // Auto-adjust contrast
+      .modulate({ brightness: 1.05 }) // Slight brightness boost
+      .toFile(finalOutputPath);
+
+    return {
+      success: true,
+      outputPath: finalOutputPath
+    };
+
+  } catch (error: any) {
+    console.error('Fast image processing error:', error);
+
+    // Fallback: just copy original
+    try {
+      const finalOutputPath = options.outputPath || imagePath.replace(/(\.[^.]+)$/, '_processed$1');
+      fs.copyFileSync(imagePath, finalOutputPath);
+      return {
+        success: true,
+        outputPath: finalOutputPath
+      };
+    } catch (copyError) {
+      return {
+        success: false,
+        message: error.message || 'Fast image processing failed'
+      };
+    }
+  }
+}
+
 export default {
   detectDocumentEdges,
   cropAndStraighten,
   enhanceDocument,
-  processScannedImage
+  processScannedImage,
+  processScannedImageFast
 };

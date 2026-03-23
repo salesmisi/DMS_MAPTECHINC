@@ -92,7 +92,8 @@ export const createDocument = async (req: AuthRequest, res: Response) => {
       try {
         // Upsert counter
         const upsertRes = await pool.query(`
-          INSERT INTO document_counters (department_id, year, last_number) VALUES ($1, $2, 1)
+          INSERT INTO document_counters (id, department_id, year, last_number)
+          VALUES (uuid_generate_v4(), $1, $2, 1)
           ON CONFLICT (department_id, year) DO UPDATE SET last_number = document_counters.last_number + 1
           RETURNING last_number
         `, [deptId, year]);

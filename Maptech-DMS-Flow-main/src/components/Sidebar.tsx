@@ -177,7 +177,10 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
             className="cursor-pointer hover:opacity-80 transition-opacity"
             title="Go to Dashboard"
           >
-            <LayoutDashboard size={24} className="text-[#C0B87A]" />
+            <img
+              src="/maptechlogo.png"
+              alt="Maptech Logo"
+              className="w-7 h-7 object-contain"/>
           </button>
         )}
     </div>

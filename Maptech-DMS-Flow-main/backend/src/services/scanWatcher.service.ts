@@ -3,7 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import pool from '../db';
 import { v4 as uuidv4 } from 'uuid';
-import { processScannedImage } from './imageProcessing.service';
+import { processScannedImage, processScannedImageFast } from './imageProcessing.service';
 
 // Store pending scan sessions waiting for files
 interface PendingScan {
@@ -165,15 +165,14 @@ async function processScannedFile(filePath: string): Promise<void> {
       const processedPath = filePath.replace(/(\.[^.]+)$/, '_processed$1');
 
       try {
-        // Add timeout to prevent hanging
+        // Use faster processing with reduced timeout (reduced from 10000ms to 3000ms)
         const processWithTimeout = async () => {
           const timeoutPromise = new Promise<{ success: false; message: string }>((resolve) => {
-            setTimeout(() => resolve({ success: false, message: 'Image processing timed out' }), 10000);
+            setTimeout(() => resolve({ success: false, message: 'Image processing timed out' }), 3000);
           });
 
-          const processPromise = processScannedImage(filePath, {
-            autoCrop: true,
-            enhance: true,
+          // Use fast processing mode for better performance
+          const processPromise = processScannedImageFast(filePath, {
             outputPath: processedPath
           });
 
@@ -253,112 +252,138 @@ async function processScannedFile(filePath: string): Promise<void> {
     // Copy processed file to uploads directory
     fs.copyFileSync(processedFilePath, newFilePath);
 
-    // Generate unique reference number with retry logic
-    const year = new Date().getFullYear();
-    const deptCode = (pendingScan.department || 'GEN').slice(0, 3).toUpperCase();
+// Optimized database operations with prepared statements and reduced queries
+async function createDocumentOptimized(params: {
+  docId: string;
+  title: string;
+  reference: string;
+  userName: string;
+  userId: string;
+  department: string;
+  ext: string;
+  fileSizeStr: string;
+  folderId: string | null;
+  newFileName: string;
+  fileBuffer: Buffer;
+}): Promise<any> {
+  const {
+    docId, title, reference, userName, userId, department, ext,
+    fileSizeStr, folderId, newFileName, fileBuffer
+  } = params;
 
-    let reference = '';
-    let lastNumber = 1;
-    let retries = 0;
-    const maxRetries = 5;
+  // Use a transaction for faster batch operations
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
 
-    while (retries < maxRetries) {
-      try {
-        if (pendingScan.departmentId) {
-          const upsertRes = await pool.query(`
-            INSERT INTO document_counters (department_id, year, last_number) VALUES ($1, $2, 1)
-            ON CONFLICT (department_id, year) DO UPDATE SET last_number = document_counters.last_number + 1
-            RETURNING last_number
-          `, [pendingScan.departmentId, year]);
-          lastNumber = upsertRes.rows[0].last_number;
-        } else {
-          // No department ID - get max reference number from documents table
-          const maxRes = await pool.query(`
-            SELECT COALESCE(MAX(CAST(SUBSTRING(reference FROM '[0-9]+$') AS INTEGER)), 0) + 1 as next_num
-            FROM documents
-            WHERE reference LIKE $1
-          `, [`${deptCode}_${year}_%`]);
-          lastNumber = maxRes.rows[0]?.next_num || 1;
-        }
-
-        // Add random suffix if retrying to ensure uniqueness
-        if (retries > 0) {
-          const randomSuffix = Math.floor(Math.random() * 100);
-          reference = `${deptCode}_${year}_${String(lastNumber).padStart(3, '0')}_${randomSuffix}`;
-        } else {
-          reference = `${deptCode}_${year}_${String(lastNumber).padStart(3, '0')}`;
-        }
-
-        // Check if reference already exists
-        const existsCheck = await pool.query('SELECT 1 FROM documents WHERE reference = $1', [reference]);
-        if (existsCheck.rows.length === 0) {
-          break; // Reference is unique
-        }
-        retries++;
-      } catch (err) {
-        retries++;
-        console.warn(`Reference generation retry ${retries}:`, err);
-      }
-    }
-
-    // Final fallback - use timestamp-based reference
-    if (!reference || retries >= maxRetries) {
-      reference = `${deptCode}_${year}_${timestamp}`;
-    }
-
-    // Insert document into database
-    const docId = uuidv4();
-    const insertRes = await pool.query(`
+    // Single optimized insert statement
+    const insertRes = await client.query(`
       INSERT INTO documents (
         id, title, reference, date, uploaded_by, uploaded_by_id,
         status, version, file_type, size, folder_id, needs_approval,
         department, file_path, file_data, scanned_from, description, created_at
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW()
+        $1, $2, $3, CURRENT_DATE, $4, $5, 'approved', 1, $6, $7, $8, false,
+        $9, $10, $11, 'NAPS2 Scanner', 'Scanned via NAPS2', NOW()
       ) RETURNING *
     `, [
-      docId,
-      pendingScan.title,
-      reference,
-      new Date().toISOString().split('T')[0],
-      pendingScan.userName,
-      pendingScan.userId,
-      'approved', // Auto-approve scanned documents
-      1,
-      ext || pendingScan.format,
-      fileSizeStr,
-      pendingScan.folderId || null,
-      false, // No approval needed for scanned documents
-      pendingScan.department,
-      `uploads/${newFileName}`,
-      fileBuffer,
-      'NAPS2 Scanner',
-      `Scanned via NAPS2`
+      docId, title, reference, userName, userId, ext,
+      fileSizeStr, folderId, `uploads/${newFileName}`, department, fileBuffer
     ]);
 
-    const document = insertRes.rows[0];
-
-    // Log the scan activity
-    await pool.query(`
+    // Optimized activity log insert (combined with document insert in same transaction)
+    await client.query(`
       INSERT INTO activity_logs (
         user_id, user_name, user_role, action, target, target_type, details, created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+      ) VALUES ($1, $2, 'staff', 'DOCUMENT_SCANNED', $3, 'document', $4, NOW())
     `, [
-      pendingScan.userId,
-      pendingScan.userName,
-      'staff',
-      'DOCUMENT_SCANNED',
-      pendingScan.title,
-      'document',
-      `Scanned document "${pendingScan.title}" via NAPS2. Reference: ${reference}`
+      userId, userName, title,
+      `Scanned document "${title}" via NAPS2. Reference: ${reference}`
     ]);
 
-    // Update scan session status
-    await pool.query(`
+    await client.query('COMMIT');
+    return insertRes.rows[0];
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+// Optimized reference generation with better caching
+const referenceCache = new Map<string, { lastNumber: number; lastUpdated: number }>();
+const REFERENCE_CACHE_DURATION = 30000; // 30 seconds
+
+async function generateUniqueReferenceOptimized(department: string, departmentId?: string): Promise<string> {
+  const year = new Date().getFullYear();
+  const deptCode = (department || 'GEN').slice(0, 3).toUpperCase();
+  const cacheKey = `${deptCode}_${year}_${departmentId || 'no-dept'}`;
+
+  // Check cache first
+  const cached = referenceCache.get(cacheKey);
+  const now = Date.now();
+
+  let lastNumber = 1;
+  if (cached && (now - cached.lastUpdated) < REFERENCE_CACHE_DURATION) {
+    lastNumber = cached.lastNumber + 1;
+    referenceCache.set(cacheKey, { lastNumber, lastUpdated: now });
+  } else {
+    // Get from database
+    try {
+      if (departmentId) {
+        const upsertRes = await pool.query(`
+          INSERT INTO document_counters (id, department_id, year, last_number)
+          VALUES (uuid_generate_v4(), $1, $2, 1)
+          ON CONFLICT (department_id, year) DO UPDATE SET last_number = document_counters.last_number + 1
+          RETURNING last_number
+        `, [departmentId, year]);
+        lastNumber = upsertRes.rows[0].last_number;
+      } else {
+        const maxRes = await pool.query(`
+          SELECT COALESCE(MAX(CAST(SUBSTRING(reference FROM '[0-9]+$') AS INTEGER)), 0) + 1 as next_num
+          FROM documents
+          WHERE reference LIKE $1
+        `, [`${deptCode}_${year}_%`]);
+        lastNumber = maxRes.rows[0]?.next_num || 1;
+      }
+      referenceCache.set(cacheKey, { lastNumber, lastUpdated: now });
+    } catch (err) {
+      console.warn('Reference generation error:', err);
+      lastNumber = Date.now() % 10000; // Fallback to timestamp-based
+    }
+  }
+
+  return `${deptCode}_${year}_${String(lastNumber).padStart(3, '0')}`;
+}
+
+    // Generate unique reference using optimized method
+    const reference = await generateUniqueReferenceOptimized(pendingScan.department, pendingScan.departmentId);
+
+    // Insert document using optimized method
+    const docId = uuidv4();
+    const document = await createDocumentOptimized({
+      docId,
+      title: pendingScan.title,
+      reference,
+      userName: pendingScan.userName,
+      userId: pendingScan.userId,
+      department: pendingScan.department,
+      ext: ext || pendingScan.format,
+      fileSizeStr,
+      folderId: pendingScan.folderId || null,
+      newFileName,
+      fileBuffer
+    });
+
+    // Update scan session status in parallel (not waiting for it)
+    pool.query(`
       UPDATE scan_sessions
       SET status = 'completed', document_id = $1, completed_at = NOW()
       WHERE id = $2
-    `, [docId, pendingScan.sessionId]);
+    `, [docId, pendingScan.sessionId]).catch(err =>
+      console.error('Failed to update scan session:', err)
+    );
 
     // Remove from pending scans
     removePendingScan(pendingScan.sessionId);
@@ -416,9 +441,12 @@ export function startScanWatcher(): void {
     ignored: /(^|[\/\\])\../, // Ignore dotfiles
     persistent: true,
     awaitWriteFinish: {
-      stabilityThreshold: 200,  // Reduced to 200ms for faster detection
-      pollInterval: 25          // Reduced to 25ms for faster polling
-    }
+      stabilityThreshold: 100,  // Reduced from 200ms to 100ms for faster detection
+      pollInterval: 10          // Reduced from 25ms to 10ms for faster polling
+    },
+    ignoreInitial: false,       // Process existing files on startup
+    usePolling: false,          // Use native OS events for better performance
+    alwaysStat: true            // Get file stats immediately
   });
 
   watcher

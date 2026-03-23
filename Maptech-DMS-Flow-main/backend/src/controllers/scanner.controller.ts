@@ -2,11 +2,12 @@ import type { Response } from 'express';
 import type { AuthRequest } from '../middleware/auth.middleware';
 import pool from '../db';
 import { v4 as uuidv4 } from 'uuid';
-import { exec } from 'child_process';
+import { exec, execSync } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import { PDFDocument } from 'pdf-lib';
 import scanWatcher from '../services/scanWatcher.service';
+import scanPerformance from '../services/scanPerformance.service';
 
 // NAPS2 executable path (can be configured via environment variable)
 const NAPS2_PATH = process.env.NAPS2_PATH || 'C:\\Program Files\\NAPS2\\NAPS2.Console.exe';
@@ -108,8 +109,8 @@ const detectWindowsScanners = (): Promise<Array<{ id: string; name: string; type
           }
         }
 
-        // Check for multifunction printers (MFPs) connected via USB
-        // Include WorkOffline property to check if printer is actually available
+        // Check for multifunction printers (MFPs) - only USB ones, skip network printers
+        // Network printers will be detected via NAPS2 ESCL
         const printerCommand = `powershell -Command "Get-WmiObject -Class Win32_Printer | Select-Object Name, PortName, PrinterStatus, Local, WorkOffline, PrinterState | ConvertTo-Json"`;
 
         exec(printerCommand, { timeout: 15000 }, (printerError, printerStdout) => {
@@ -126,24 +127,24 @@ const detectWindowsScanners = (): Promise<Array<{ id: string; name: string; type
                   // Skip virtual printers (Microsoft XPS, PDF, OneNote, Fax)
                   const isVirtualPrinter = /Microsoft (XPS|Print to PDF)|OneNote|Fax/i.test(printer.Name);
 
+                  // Skip network printers - they will be detected via ESCL
+                  const isNetworkPrinter = /\(network\)/i.test(printer.Name) || (!isUsb && !printer.PortName?.startsWith('USB'));
+
                   // Determine actual printer status
-                  // WorkOffline = true means printer is set to offline mode
-                  // PrinterStatus: 0=Other, 1=Unknown, 2=Idle, 3=Printing, 4=Warmup, 5=Stopped, 6=Offline, 7=Paused
-                  // PrinterState: 0=Ready, other values indicate various error/offline states
                   const isOffline = printer.WorkOffline === true ||
                                     printer.PrinterStatus === 6 ||
                                     printer.PrinterStatus === 5 ||
                                     printer.PrinterStatus === 7;
                   const isReady = !isOffline && (printer.PrinterStatus === 0 || printer.PrinterStatus === 2 || printer.PrinterStatus === 3 || printer.PrinterStatus === 4);
 
-                  // Include all local printers as they might have scan capability (except virtual printers)
-                  if (!exists && printer.Local && !isVirtualPrinter) {
+                  // Only include USB printers (not virtual, not network)
+                  if (!exists && printer.Local && !isVirtualPrinter && isUsb && !isNetworkPrinter) {
                     devices.push({
                       id: `mfp-${index}`,
                       name: printer.Name,
                       type: 'multifunction',
                       status: isReady ? 'ready' : 'offline',
-                      connection: isUsb ? 'USB' : 'Local'
+                      connection: 'USB'
                     });
                   }
                 }
@@ -160,27 +161,108 @@ const detectWindowsScanners = (): Promise<Array<{ id: string; name: string; type
   });
 };
 
-// Helper to detect scanners using NAPS2
+// Helper to check if a network device is reachable (optimized)
+const checkNetworkDevice = (ip: string): Promise<boolean> => {
+  return scanPerformance.checkNetworkDeviceOptimized(ip);
+};
+
+// Helper to detect scanners using NAPS2 (both WIA and ESCL drivers)
 const detectNaps2Scanners = (naps2Path: string): Promise<Array<{ id: string; name: string; type: string; status: string; connection: string }>> => {
-  return new Promise((resolve) => {
-    exec(`"${naps2Path}" --listdevices`, { timeout: 15000 }, (error, stdout) => {
-      if (error) {
-        resolve([]);
-        return;
+  return new Promise(async (resolve) => {
+    const devices: Array<{ id: string; name: string; type: string; status: string; connection: string }> = [];
+    const seenNames = new Set<string>();
+
+    // Check known network scanners and verify they're online
+    const knownNetworkScanners = [
+      { id: 'escl-known-0', name: 'EPSON L5290 Series (192.168.1.40)', ip: '192.168.1.40', type: 'scanner', connection: 'Network' },
+      { id: 'escl-known-1', name: 'EPSON L6460 Series (192.168.1.109)', ip: '192.168.1.109', type: 'scanner', connection: 'Network' }
+    ];
+
+    // Check each network scanner in parallel
+    const networkChecks = await Promise.all(
+      knownNetworkScanners.map(async (scanner) => {
+        const isOnline = await checkNetworkDevice(scanner.ip);
+        return {
+          id: scanner.id,
+          name: scanner.name,
+          type: scanner.type,
+          status: isOnline ? 'ready' : 'offline',
+          connection: scanner.connection
+        };
+      })
+    );
+
+    networkChecks.forEach(scanner => {
+      seenNames.add(scanner.name.toLowerCase());
+      devices.push(scanner);
+    });
+
+    // First detect WIA devices (local/USB scanners)
+    exec(`"${naps2Path}" --listdevices --driver wia`, { timeout: 20000 }, (wiaError, wiaStdout) => {
+      if (!wiaError && wiaStdout.trim()) {
+        const lines = wiaStdout.split('\n').filter(line => line.trim());
+        lines.forEach((name, index) => {
+          const trimmedName = name.trim();
+          if (trimmedName && !seenNames.has(trimmedName.toLowerCase())) {
+            seenNames.add(trimmedName.toLowerCase());
+            devices.push({
+              id: `wia-${index}`,
+              name: trimmedName,
+              type: 'scanner',
+              status: 'ready',
+              connection: 'USB'
+            });
+          }
+        });
       }
 
-      const lines = stdout.split('\n').filter(line => line.trim());
-      const scanners = lines.map((name, index) => ({
-        id: `naps2-${index}`,
-        name: name.trim(),
-        type: 'scanner',
-        status: 'ready',
-        connection: 'NAPS2'
-      }));
-
-      resolve(scanners);
+      // Return immediately with known devices + WIA devices
+      // ESCL detection is too slow and unreliable
+      resolve(devices);
     });
   });
+};
+
+// Helper to find matching ESCL device for a network scanner name (synchronous)
+const findEsclDeviceSync = (naps2Path: string, scannerName: string): string | null => {
+  try {
+    console.log('Looking up ESCL device for:', scannerName);
+    const stdout = execSync(`"${naps2Path}" --listdevices --driver escl`, {
+      timeout: 45000,
+      encoding: 'utf8'
+    });
+
+    if (!stdout.trim()) {
+      console.log('No ESCL devices found');
+      return null;
+    }
+
+    console.log('ESCL devices found:', stdout.trim());
+    const lines = stdout.split('\n').filter(line => line.trim());
+
+    // Extract base name from "(Network)" format, e.g., "L5290 Series(Network)" -> "L5290"
+    const baseName = scannerName.replace(/\s*\(network\)/i, '').trim();
+    const searchTerms = baseName.toLowerCase().split(/\s+/);
+    console.log('Searching for terms:', searchTerms);
+
+    // Find ESCL device that matches the base name
+    for (const line of lines) {
+      const esclName = line.trim();
+      const esclLower = esclName.toLowerCase();
+      // Check if all search terms are present in the ESCL device name
+      const matches = searchTerms.every(term => esclLower.includes(term));
+      if (matches) {
+        console.log('Found matching ESCL device:', esclName);
+        return esclName;
+      }
+    }
+
+    console.log('No matching ESCL device found for:', scannerName);
+    return null;
+  } catch (error: any) {
+    console.error('ESCL device lookup error:', error.message);
+    return null;
+  }
 };
 
 async function resolveUserScanContext(userId: string, folderId?: string) {
@@ -233,7 +315,8 @@ async function generateUniqueReference(department: string, departmentId?: string
     try {
       if (departmentId) {
         const upsertRes = await pool.query(`
-          INSERT INTO document_counters (department_id, year, last_number) VALUES ($1, $2, 1)
+          INSERT INTO document_counters (id, department_id, year, last_number)
+          VALUES (uuid_generate_v4(), $1, $2, 1)
           ON CONFLICT (department_id, year) DO UPDATE SET last_number = document_counters.last_number + 1
           RETURNING last_number
         `, [departmentId, year]);
@@ -339,51 +422,31 @@ function getStringParam(param: string | string[] | undefined): string {
   return param || '';
 }
 
-// Get available scanners using multiple detection methods
+// Get available scanners using optimized detection methods
 export const listScanners = async (_req: AuthRequest, res: Response) => {
   try {
-    const allDevices: Array<{ id: string; name: string; type: string; status: string; connection: string }> = [];
-    const seenNames = new Set<string>();
+    const startTime = Date.now();
 
-    // Try NAPS2 first (most reliable for scanners)
+    // Check if NAPS2 is installed
     const naps2Exists = fs.existsSync(NAPS2_PATH);
-    if (naps2Exists) {
-      const naps2Devices = await detectNaps2Scanners(NAPS2_PATH);
-      naps2Devices.forEach(device => {
-        const key = device.name.toLowerCase();
-        if (!seenNames.has(key)) {
-          seenNames.add(key);
-          allDevices.push(device);
-        }
-      });
-    }
 
-    // Also try Windows WMI detection (especially for USB devices)
-    const wmiDevices = await detectWindowsScanners();
-    wmiDevices.forEach(device => {
-      const key = device.name.toLowerCase();
-      if (!seenNames.has(key)) {
-        seenNames.add(key);
-        allDevices.push(device);
-      }
-    });
+    // Use optimized scanner discovery
+    const allDevices = await scanPerformance.detectAllScannersOptimized(
+      naps2Exists ? NAPS2_PATH : undefined
+    );
 
-    // Sort: USB scanners first, then other scanners, then multifunction printers
-    allDevices.sort((a, b) => {
-      // USB devices first
-      if (a.connection === 'USB' && b.connection !== 'USB') return -1;
-      if (a.connection !== 'USB' && b.connection === 'USB') return 1;
-      // Then scanners before multifunction
-      if (a.type === 'scanner' && b.type !== 'scanner') return -1;
-      if (a.type !== 'scanner' && b.type === 'scanner') return 1;
-      return a.name.localeCompare(b.name);
-    });
+    const detectionTime = Date.now() - startTime;
+    console.log(`Scanner detection completed in ${detectionTime}ms (optimized)`);
 
     return res.json({
       scanners: allDevices,
       naps2Available: naps2Exists,
+      performance: {
+        detectionTimeMs: detectionTime,
+        cached: scanPerformance.getScannerCacheStatus().cached
+      },
       message: allDevices.length > 0
-        ? `Found ${allDevices.length} device(s)`
+        ? `Found ${allDevices.length} device(s) in ${detectionTime}ms`
         : 'No scanners or printers detected. Make sure your USB device is connected and powered on.'
     });
 
@@ -396,11 +459,50 @@ export const listScanners = async (_req: AuthRequest, res: Response) => {
 // Create a scan session and trigger NAPS2
 export const startScan = async (req: AuthRequest, res: Response) => {
   try {
-    const { title, format, folderId, scannerName, multiPage, batchId: incomingBatchId, pageNumber } = req.body;
+    const {
+      title,
+      format,
+      folderId,
+      scannerName,
+      multiPage,
+      batchId: incomingBatchId,
+      pageNumber,
+      dpi = 300,
+      colorMode = 'color',
+      paperSize = 'letter',
+      scanSource = 'auto',
+    } = req.body;
+        // Validate: Legal size requires ADF
+        if (String(paperSize).toLowerCase() === 'legal' && scanSource !== 'feeder') {
+          return res.status(400).json({ error: 'Legal size scanning requires the document feeder (ADF). Please select ADF as the scan source.' });
+        }
     const userId = req.userId;
     const isMultiPage = Boolean(multiPage);
     const normalizedPageNumber = Number.isFinite(Number(pageNumber)) ? Math.max(1, Number(pageNumber)) : 1;
     const effectiveFormat = isMultiPage ? 'pdf' : (format || 'pdf');
+
+    // Validate and normalize DPI (allowed: 150, 200, 300, 600)
+    const allowedDpi = [150, 200, 300, 600];
+    const effectiveDpi = allowedDpi.includes(Number(dpi)) ? Number(dpi) : 300;
+
+    // Map color mode to NAPS2 bitdepth values
+    const colorModeMap: Record<string, string> = {
+      'bw': 'bw',
+      'blackwhite': 'bw',
+      'black & white': 'bw',
+      'gray': 'gray',
+      'grayscale': 'gray',
+      'color': 'color'
+    };
+    const effectiveColorMode = colorModeMap[String(colorMode).toLowerCase()] || 'color';
+
+    // Map paper size to NAPS2 pagesize values
+    const paperSizeMap: Record<string, string> = {
+      'letter': 'letter',
+      'a4': 'a4',
+      'legal': 'legal'
+    };
+    const effectivePaperSize = paperSizeMap[String(paperSize).toLowerCase()] || 'letter';
 
     if (!title) {
       return res.status(400).json({ error: 'Document title is required' });
@@ -486,13 +588,117 @@ export const startScan = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    // Build NAPS2 command - use interactive mode (no --device) to let user select scanner in NAPS2 GUI
-    // If scannerName is provided and not empty, use it with WIA driver
+    // Build NAPS2 command based on scanner type
     let naps2Command: string;
+    let actualDeviceName = scannerName;
 
     if (scannerName && scannerName.trim()) {
-      // Use specified scanner with WIA driver (most compatible)
-      naps2Command = `"${NAPS2_PATH}" -o "${outputPath}" --driver wia --device "${scannerName}"`;
+      const deviceName = scannerName.trim();
+      // Detect if it's a network/ESCL scanner:
+      // - Contains IP address (e.g., "EPSON L5290 Series (192.168.1.40)")
+      // - Or has "(Network)" suffix from WMI detection
+      // - Or is a known network scanner model
+      const hasIpAddress = /\(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\)/.test(deviceName);
+      const hasNetworkSuffix = /\(network\)/i.test(deviceName);
+      const isKnownNetworkScanner = /l5290|l6460/i.test(deviceName);
+      const isNetworkScanner = hasIpAddress || hasNetworkSuffix || isKnownNetworkScanner;
+
+      if (isNetworkScanner) {
+        // Network scanners use ESCL driver
+        if (hasIpAddress) {
+          // Already in proper ESCL format with IP
+          actualDeviceName = deviceName;
+        } else {
+          // Map to known ESCL device names with IP addresses
+          if (/l5290/i.test(deviceName)) {
+            actualDeviceName = 'EPSON L5290 Series (192.168.1.40)';
+          } else if (/l6460/i.test(deviceName)) {
+            actualDeviceName = 'EPSON L6460 Series (192.168.1.109)';
+          } else {
+            // Fallback: try to find the device
+            const esclDevice = findEsclDeviceSync(NAPS2_PATH, deviceName);
+            if (esclDevice) {
+              actualDeviceName = esclDevice;
+            } else {
+              // Last resort: interactive mode
+              console.log(`No ESCL device found matching "${deviceName}", using interactive mode`);
+              naps2Command = `"${NAPS2_PATH}" -o "${outputPath}" --interactivescan --pdfcompat PDF_A_2B`;
+              console.log('NAPS2 Command:', naps2Command);
+              exec(naps2Command, { timeout: 300000 }, async (error, _stdout, stderr) => {
+                if (error) {
+                  console.error('NAPS2 scan error:', stderr || error.message);
+                  await pool.query(`
+                    UPDATE scan_sessions SET status = 'failed', error_message = $1 WHERE id = $2
+                  `, [stderr || error.message, sessionId]);
+                }
+              });
+              return res.json({
+                sessionId,
+                batchId,
+                pageNumber: normalizedPageNumber,
+                multiPage: isMultiPage,
+                message: 'NAPS2 opened. Please select your network scanner manually.',
+                scansDirectory: scansDir,
+                status: 'scanning',
+                manualMode: false,
+                networkScanner: true
+              });
+            }
+          }
+        }
+        // Network scanners: use ESCL driver with user-selected DPI, color mode, and paper size
+        // Map scanSource to NAPS2 CLI
+        let sourceArg = '';
+        if (scanSource === 'glass') sourceArg = '--source glass';
+        else if (scanSource === 'feeder') sourceArg = '--source feeder';
+        // 'auto' omits --source for auto-detect
+        naps2Command = `"${NAPS2_PATH}" -o "${outputPath}" --driver escl --device "${actualDeviceName}" ${sourceArg} --dpi ${effectiveDpi} --bitdepth ${effectiveColorMode} --pagesize ${effectivePaperSize} --force --pdfcompat PDF_A_2B`;
+        console.log('NAPS2 ESCL Command:', naps2Command);
+        console.log(`Scan settings: DPI=${effectiveDpi}, ColorMode=${effectiveColorMode}, PaperSize=${effectivePaperSize}`);
+
+        // Run synchronously for network scanners to avoid timeout issues
+        try {
+          execSync(naps2Command, { timeout: 120000, encoding: 'utf8' });
+          console.log('Scan completed successfully');
+        } catch (scanError: any) {
+          let errorMsg = scanError.message || '';
+          // Detect timeout or feeder empty
+          if (/timed out|timeout/i.test(errorMsg)) {
+            errorMsg = 'Scan timed out. Please check that paper is loaded in the ADF (feeder) and the scanner is ready.';
+          } else if (/feeder.*empty|no paper|not loaded|document feeder/i.test(errorMsg)) {
+            errorMsg = 'ADF (feeder) is empty. Please load paper into the document feeder and try again.';
+          } else if (/no scanner|not found|device/i.test(errorMsg)) {
+            errorMsg = 'Scanner not found or unavailable. Please check the device connection.';
+          } else {
+            errorMsg = 'Scan failed: ' + errorMsg;
+          }
+          console.error('NAPS2 scan error:', errorMsg);
+          await pool.query(`
+            UPDATE scan_sessions SET status = 'failed', error_message = $1 WHERE id = $2
+          `, [errorMsg, sessionId]);
+          return res.status(500).json({ error: errorMsg });
+        }
+
+        return res.json({
+          sessionId,
+          batchId,
+          pageNumber: normalizedPageNumber,
+          multiPage: isMultiPage,
+          message: `Scanned with ${actualDeviceName}`,
+          scansDirectory: scansDir,
+          status: 'completed',
+          manualMode: false,
+          networkScanner: true,
+          scanSettings: { dpi: effectiveDpi, colorMode: effectiveColorMode, paperSize: effectivePaperSize }
+        });
+      } else {
+        // Local/USB scanners use WIA driver with user-selected settings
+        // Map scanSource for WIA (USB/local) as well
+        let wiaSourceArg = '';
+        if (scanSource === 'glass') wiaSourceArg = '--source glass';
+        else if (scanSource === 'feeder') wiaSourceArg = '--source feeder';
+        naps2Command = `"${NAPS2_PATH}" -o "${outputPath}" --driver wia --device "${deviceName}" ${wiaSourceArg} --dpi ${effectiveDpi} --bitdepth ${effectiveColorMode} --pagesize ${effectivePaperSize}`;
+      }
     } else {
       // No scanner specified - open NAPS2 GUI for interactive scanning
       naps2Command = `"${NAPS2_PATH}" -o "${outputPath}" --interactivescan`;
@@ -517,15 +723,20 @@ export const startScan = async (req: AuthRequest, res: Response) => {
       // File watcher will handle the rest when file appears
     });
 
+    // Detect if network scanner for response message
+    const hasIpInName = actualDeviceName && /\(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\)/.test(actualDeviceName);
+    const isNetworkDevice = hasIpInName || (scannerName && /\(network\)/i.test(scannerName));
+
     return res.json({
       sessionId,
       batchId,
       pageNumber: normalizedPageNumber,
       multiPage: isMultiPage,
-      message: scannerName ? `Scanning with ${scannerName}...` : 'NAPS2 opened. Please scan your document.',
+      message: actualDeviceName ? `Scanning with ${actualDeviceName}...` : 'NAPS2 opened. Please scan your document.',
       scansDirectory: scansDir,
       status: 'scanning',
-      manualMode: false
+      manualMode: false,
+      networkScanner: isNetworkDevice
     });
 
   } catch (err: any) {
@@ -810,6 +1021,26 @@ export const cancelScan = async (req: AuthRequest, res: Response) => {
   }
 };
 
+// Get performance metrics
+export const getPerformanceMetrics = async (_req: AuthRequest, res: Response) => {
+  try {
+    const metrics = scanPerformance.getPerformanceMetrics();
+    return res.json(metrics);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+// Clear scanner cache for refresh
+export const clearScannerCache = async (_req: AuthRequest, res: Response) => {
+  try {
+    scanPerformance.clearScannerCache();
+    return res.json({ message: 'Scanner cache cleared successfully' });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+};
+
 export default {
   checkNaps2Installation,
   listScanners,
@@ -820,5 +1051,7 @@ export default {
   getRecentScans,
   getWatcherStatus,
   getLastScannedDocument,
-  cancelScan
+  cancelScan,
+  getPerformanceMetrics,
+  clearScannerCache
 };

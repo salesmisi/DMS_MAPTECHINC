@@ -2,10 +2,12 @@ import React, { useState } from 'react';
 import { Eye, EyeOff, Lock, Mail } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
+import { useNavigation } from '../App';
 
 export function LoginPage() {
   const { login } = useAuth();
   const { t } = useLanguage();
+  const { navigate } = useNavigation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -55,11 +57,18 @@ export function LoginPage() {
 
           {/* LOGO SECTION */}
           <div className="text-center mb-8">
-            <img
-              src="/maptechlogo.png"
-              alt="Maptech Logo"
-              className="w-66 object-contain mx-auto mb-4"
-            />
+            <button
+              type="button"
+              onClick={() => navigate('dashboard')}
+              className="mx-auto block hover:opacity-90 transition-opacity"
+              title="Go to Dashboard"
+            >
+              <img
+                src="/maptechlogo.png"
+                alt="Maptech Logo"
+                className="w-66 object-contain mx-auto mb-4"
+              />
+            </button>
             <p className="text-white text-lg font-semibold">
               {t('documentManagementSystem')}
             </p>
