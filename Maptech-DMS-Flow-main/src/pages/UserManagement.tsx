@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff, CheckCircle, XCircle } from 'lucide-react';
 import {
   Users,
   Plus,
@@ -18,6 +18,41 @@ import { useDocuments } from '../context/DocumentContext';
 import { AutocompleteSearch } from '../components/AutocompleteSearch';
 import { useLanguage } from '../context/LanguageContext';
 
+// Password validation rules
+const PASSWORD_RULES = {
+  minLength: 8,
+  hasUppercase: /[A-Z]/,
+  hasLowercase: /[a-z]/,
+  hasNumber: /[0-9]/,
+  hasSpecial: /[!@#$%^&*(),.?":{}|<>_\-+=\[\]\\\/`~;']/,
+};
+
+interface PasswordValidation {
+  minLength: boolean;
+  hasUppercase: boolean;
+  hasLowercase: boolean;
+  hasNumber: boolean;
+  hasSpecial: boolean;
+  isValid: boolean;
+}
+
+const validatePassword = (password: string): PasswordValidation => {
+  const minLength = password.length >= PASSWORD_RULES.minLength;
+  const hasUppercase = PASSWORD_RULES.hasUppercase.test(password);
+  const hasLowercase = PASSWORD_RULES.hasLowercase.test(password);
+  const hasNumber = PASSWORD_RULES.hasNumber.test(password);
+  const hasSpecial = PASSWORD_RULES.hasSpecial.test(password);
+
+  return {
+    minLength,
+    hasUppercase,
+    hasLowercase,
+    hasNumber,
+    hasSpecial,
+    isValid: minLength && hasUppercase && hasLowercase && hasNumber && hasSpecial,
+  };
+};
+
 interface Department {
   id: string;
   name: string;
@@ -34,6 +69,13 @@ export function UserManagement() {
   const [showAddUser, setShowAddUser] = useState(false);
   const [showAddDept, setShowAddDept] = useState(false);
   const [editingUser, setEditingUser] = useState<string | null>(null);
+  const [editUserData, setEditUserData] = useState({
+    name: '',
+    email: '',
+    role: 'staff' as 'admin' | 'manager' | 'staff',
+    department: '',
+    status: 'active' as 'active' | 'inactive'
+  });
   const [departments, setDepartments] = useState<Department[]>([]);
   const [loadingDepts, setLoadingDepts] = useState(true);
   const [activeTab, setActiveTab] = useState<'users' | 'departments'>('users');
@@ -223,6 +265,36 @@ export function UserManagement() {
       details: `Status changed from ${currentStatus} to ${newStatus}`
     });
   };
+
+  const handleEditUser = (u: typeof users[0]) => {
+    setEditingUser(u.id);
+    setEditUserData({
+      name: u.name,
+      email: u.email,
+      role: u.role,
+      department: u.department,
+      status: u.status
+    });
+  };
+
+  const handleSaveEditUser = async () => {
+    if (!editingUser) return;
+    await updateUser(editingUser, editUserData);
+    const targetUser = users.find((u) => u.id === editingUser);
+    addLog({
+      userId: currentUser?.id || '',
+      userName: currentUser?.name || '',
+      userRole: currentUser?.role || 'admin',
+      action: 'USER_UPDATED',
+      target: targetUser?.name || editingUser,
+      targetType: 'user',
+      timestamp: new Date().toISOString(),
+      ipAddress: '192.168.1.100',
+      details: `User details updated: ${editUserData.name}, ${editUserData.role}, ${editUserData.department}`
+    });
+    setEditingUser(null);
+  };
+
   const handleDeleteUser = async (id: string, name: string) => {
     setDeleteConfirm({ id, name });
   };
@@ -370,6 +442,13 @@ export function UserManagement() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1 justify-end">
+                        <button
+                          onClick={() => handleEditUser(u)}
+                          className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                          title="Edit User"
+                        >
+                          <Edit2 size={15} />
+                        </button>
                         <button
                       onClick={() => handleToggleStatus(u.id, u.status)}
                       className={`p-1.5 rounded transition-colors ${u.status === 'active' ? 'text-gray-400 hover:text-red-600 hover:bg-red-50' : 'text-gray-400 hover:text-green-600 hover:bg-green-50'}`}
@@ -606,6 +685,131 @@ export function UserManagement() {
         </div>
       }
 
+      {/* Edit User Modal */}
+      {editingUser && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="p-6 border-b border-gray-100">
+              <h3 className="font-semibold text-gray-800 text-lg">
+                Edit User
+              </h3>
+              <p className="text-sm text-gray-500 mt-0.5">
+                Update user details
+              </p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  {t('fullNameRequired')}
+                </label>
+                <input
+                  type="text"
+                  value={editUserData.name}
+                  onChange={(e) =>
+                    setEditUserData((prev) => ({
+                      ...prev,
+                      name: e.target.value
+                    }))
+                  }
+                  className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#427A43]"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  {t('emailRequired')}
+                </label>
+                <input
+                  type="email"
+                  value={editUserData.email}
+                  onChange={(e) =>
+                    setEditUserData((prev) => ({
+                      ...prev,
+                      email: e.target.value
+                    }))
+                  }
+                  className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#427A43]"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                    {t('role')}
+                  </label>
+                  <select
+                    value={editUserData.role}
+                    onChange={(e) =>
+                      setEditUserData((prev) => ({
+                        ...prev,
+                        role: e.target.value as any
+                      }))
+                    }
+                    className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#427A43]"
+                  >
+                    <option value="staff">{t('staff')}</option>
+                    <option value="manager">{t('manager')}</option>
+                    <option value="admin">{t('admin')}</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                    {t('department')}
+                  </label>
+                  <select
+                    value={editUserData.department}
+                    onChange={(e) =>
+                      setEditUserData((prev) => ({
+                        ...prev,
+                        department: e.target.value
+                      }))
+                    }
+                    className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#427A43]"
+                  >
+                    <option value="">{t('selectDepartment')}</option>
+                    {departments.map((dept) => (
+                      <option key={dept.id} value={dept.name}>
+                        {dept.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  {t('status')}
+                </label>
+                <select
+                  value={editUserData.status}
+                  onChange={(e) =>
+                    setEditUserData((prev) => ({
+                      ...prev,
+                      status: e.target.value as any
+                    }))
+                  }
+                  className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#427A43]"
+                >
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+              </div>
+            </div>
+            <div className="p-6 pt-0 flex gap-3">
+              <button
+                onClick={handleSaveEditUser}
+                className="flex-1 py-2.5 bg-[#005F02] text-white text-sm font-semibold rounded-lg hover:bg-[#427A43] transition-colors"
+              >
+                Save Changes
+              </button>
+              <button
+                onClick={() => setEditingUser(null)}
+                className="flex-1 py-2.5 border border-gray-300 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                {t('cancel')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Add Department Modal */}
       {showAddDept &&
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -747,7 +951,7 @@ export function UserManagement() {
                   {resetPwError && (
                     <p className="text-sm text-red-600 mb-3">{resetPwError}</p>
                   )}
-                  <div className="w-full relative mb-5">
+                  <div className="w-full relative mb-3">
                     <input
                       type={resetPwShow ? 'text' : 'password'}
                       value={resetPwValue}
@@ -763,11 +967,47 @@ export function UserManagement() {
                       {resetPwShow ? <EyeOff size={18} /> : <Eye size={15} />}
                     </button>
                   </div>
+                  {/* Password Rules Checklist */}
+                  {resetPwValue.length > 0 && (
+                    <div className="w-full mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200 text-left">
+                      <p className="text-xs font-medium text-gray-600 mb-2">Password Requirements:</p>
+                      <div className="grid grid-cols-1 gap-1.5">
+                        {(() => {
+                          const validation = validatePassword(resetPwValue);
+                          return (
+                            <>
+                              <div className={`flex items-center gap-2 text-xs ${validation.minLength ? 'text-green-600' : 'text-gray-500'}`}>
+                                {validation.minLength ? <CheckCircle size={14} /> : <XCircle size={14} />}
+                                <span>At least 8 characters</span>
+                              </div>
+                              <div className={`flex items-center gap-2 text-xs ${validation.hasUppercase ? 'text-green-600' : 'text-gray-500'}`}>
+                                {validation.hasUppercase ? <CheckCircle size={14} /> : <XCircle size={14} />}
+                                <span>One uppercase letter (A-Z)</span>
+                              </div>
+                              <div className={`flex items-center gap-2 text-xs ${validation.hasLowercase ? 'text-green-600' : 'text-gray-500'}`}>
+                                {validation.hasLowercase ? <CheckCircle size={14} /> : <XCircle size={14} />}
+                                <span>One lowercase letter (a-z)</span>
+                              </div>
+                              <div className={`flex items-center gap-2 text-xs ${validation.hasNumber ? 'text-green-600' : 'text-gray-500'}`}>
+                                {validation.hasNumber ? <CheckCircle size={14} /> : <XCircle size={14} />}
+                                <span>One number (0-9)</span>
+                              </div>
+                              <div className={`flex items-center gap-2 text-xs ${validation.hasSpecial ? 'text-green-600' : 'text-gray-500'}`}>
+                                {validation.hasSpecial ? <CheckCircle size={14} /> : <XCircle size={14} />}
+                                <span>One special character (!@#$%^&*)</span>
+                              </div>
+                            </>
+                          );
+                        })()}
+                      </div>
+                    </div>
+                  )}
                   <div className="flex gap-3 w-full">
                     <button
                       onClick={async () => {
-                        if (resetPwValue.length < 6) {
-                          setResetPwError(t('passwordMinChars'));
+                        const validation = validatePassword(resetPwValue);
+                        if (!validation.isValid) {
+                          setResetPwError('Password does not meet security requirements');
                           return;
                         }
                         const success = await resetPassword(resetPwUser.id, resetPwValue);

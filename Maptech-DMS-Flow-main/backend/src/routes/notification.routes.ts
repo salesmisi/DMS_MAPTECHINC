@@ -5,6 +5,8 @@ import {
   markAsRead,
   markAllAsRead,
   createNotification,
+  deleteNotification,
+  deleteNotificationsByType,
 } from '../controllers/notification.controller';
 import {
   getNotificationPreferences,
@@ -21,5 +23,7 @@ router.put('/preferences', authenticate, updateNotificationPreferences);
 router.put('/:id/read', authenticate, markAsRead);
 router.put('/read-all', authenticate, markAllAsRead);
 router.post('/', authenticate, createNotification);
+router.delete('/:id', authenticate, deleteNotification);
+router.delete('/type/:type', authenticate, deleteNotificationsByType);
 
 export default router;

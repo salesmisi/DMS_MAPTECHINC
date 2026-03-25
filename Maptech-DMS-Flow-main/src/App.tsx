@@ -4,6 +4,7 @@ import { DocumentProvider } from './context/DocumentContext';
 import { NotificationProvider, useNotifications } from './context/NotificationContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { LanguageProvider } from './context/LanguageContext';
+import { LogoProvider } from './context/LogoContext';
 import { LoginPage } from './pages/LoginPage';
 import { AdminDashboard } from './pages/AdminDashboard';
 import AdminDeleteRequests from './pages/AdminDeleteRequests';
@@ -53,7 +54,7 @@ export function useNavigation() {
 }
 function AppContent() {
   const { user } = useAuth();
-  const { createNotification } = useNotifications();
+  const { createNotification, deleteNotificationsByType } = useNotifications();
   const [currentPage, setCurrentPage] = useState<PageName>('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
@@ -73,13 +74,14 @@ function AppContent() {
       if (!res.ok) return;
       const data = await res.json();
       setLogCount(data.count);
-      if (data.count >= 100 && !dismissed) {
+      // Only show popup for admin and manager users, not staff
+      if (data.count >= 100 && !dismissed && user && (user.role === 'admin' || user.role === 'manager')) {
         setShowExportPopup(true);
       }
     } catch {
       // silently ignore polling errors
     }
-  }, [dismissed]);
+  }, [dismissed, user]);
 
   useEffect(() => {
     if (!user) return;
@@ -163,10 +165,12 @@ function AppContent() {
               });
             }
           }}
-          onExported={() => {
+          onExported={async () => {
             setShowExportPopup(false);
             setDismissed(false);
             setLogCount(0);
+            // Delete any activity-log-export notifications
+            await deleteNotificationsByType('activity-log-export');
             checkLogCount();
           }}
         />
@@ -177,15 +181,17 @@ function AppContent() {
 export function App() {
   return (
     <LanguageProvider>
-      <ThemeProvider>
-        <AuthProvider>
-          <DocumentProvider>
-            <NotificationProvider>
-              <AppContent />
-            </NotificationProvider>
-          </DocumentProvider>
-        </AuthProvider>
-      </ThemeProvider>
+      <LogoProvider>
+        <ThemeProvider>
+          <AuthProvider>
+            <DocumentProvider>
+              <NotificationProvider>
+                <AppContent />
+              </NotificationProvider>
+            </DocumentProvider>
+          </AuthProvider>
+        </ThemeProvider>
+      </LogoProvider>
     </LanguageProvider>);
 
 }

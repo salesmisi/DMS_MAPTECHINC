@@ -36,6 +36,8 @@ interface NotificationContextType {
   fetchNotifications: () => Promise<void>;
   markAsRead: (id: string) => Promise<void>;
   markAllAsRead: () => Promise<void>;
+  deleteNotification: (id: string) => Promise<void>;
+  deleteNotificationsByType: (type: string) => Promise<void>;
   createNotification: (data: {
     userId: string;
     type?: string;
@@ -190,6 +192,76 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     }
   }, [headers, notifications, unreadCount]);
 
+  // Delete a single notification
+  const deleteNotification = useCallback(
+    async (id: string) => {
+      const notificationToDelete = notifications.find((n) => n.id === id);
+      const wasUnread = notificationToDelete && !notificationToDelete.isRead;
+
+      // Optimistic update
+      setNotifications((prev) => prev.filter((n) => n.id !== id));
+      if (wasUnread) {
+        setUnreadCount((prev) => Math.max(0, prev - 1));
+      }
+
+      try {
+        const res = await fetch(`${API_URL}/notifications/${id}`, {
+          method: 'DELETE',
+          headers: headers(),
+        });
+        if (!res.ok) {
+          // Rollback on failure
+          if (notificationToDelete) {
+            setNotifications((prev) => [...prev, notificationToDelete]);
+            if (wasUnread) {
+              setUnreadCount((prev) => prev + 1);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('deleteNotification error:', err);
+        // Rollback
+        if (notificationToDelete) {
+          setNotifications((prev) => [...prev, notificationToDelete]);
+          if (wasUnread) {
+            setUnreadCount((prev) => prev + 1);
+          }
+        }
+      }
+    },
+    [headers, notifications]
+  );
+
+  // Delete notifications by type
+  const deleteNotificationsByType = useCallback(
+    async (type: string) => {
+      const notificationsToDelete = notifications.filter((n) => n.type === type);
+      const unreadToDelete = notificationsToDelete.filter((n) => !n.isRead).length;
+
+      // Optimistic update
+      setNotifications((prev) => prev.filter((n) => n.type !== type));
+      setUnreadCount((prev) => Math.max(0, prev - unreadToDelete));
+
+      try {
+        const res = await fetch(`${API_URL}/notifications/type/${type}`, {
+          method: 'DELETE',
+          headers: headers(),
+        });
+        if (!res.ok) {
+          // Rollback on failure
+          setNotifications((prev) => [...prev, ...notificationsToDelete]);
+          setUnreadCount((prev) => prev + unreadToDelete);
+        }
+      } catch (err) {
+        console.error('deleteNotificationsByType error:', err);
+        // Rollback
+        setNotifications((prev) => [...prev, ...notificationsToDelete]);
+        setUnreadCount((prev) => prev + unreadToDelete);
+      }
+    },
+    [headers, notifications]
+  );
+
   // Create a notification
   const createNotification = useCallback(
     async (data: {
@@ -266,6 +338,8 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         fetchNotifications,
         markAsRead,
         markAllAsRead,
+        deleteNotification,
+        deleteNotificationsByType,
         createNotification,
       }}
     >

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Menu, Bell, Search, ChevronDown, User, Settings, LogOut, FileText, CheckCheck } from 'lucide-react';
+import { Menu, Bell, ChevronDown, User, Settings, LogOut, FileText, CheckCheck } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigation, PageName } from '../App';
 import { useDocuments } from '../context/DocumentContext';
@@ -7,8 +7,6 @@ import { useNotifications } from '../context/NotificationContext';
 import { hasApprovalAccess } from '../utils/roles';
 import { useTheme } from '../context/ThemeContext';
 import { useLanguage } from '../context/LanguageContext';
-import { formatDateOnly } from '../utils/locale';
-import { AutocompleteSearch } from './AutocompleteSearch';
 interface HeaderProps {
   onMenuToggle: () => void;
   currentPage: PageName;
@@ -18,17 +16,12 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
   const { user, logout } = useAuth();
   const { navigate } = useNavigation();
   const { documents } = useDocuments();
-  const { notifications: dbNotifications, unreadCount, markAsRead, markAllAsRead } = useNotifications();
+  const { notifications: dbNotifications, unreadCount, markAsRead, markAllAsRead, deleteNotification } = useNotifications();
   const { theme, toggleTheme } = useTheme();
   const { t } = useLanguage();
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
   const isApprover = hasApprovalAccess(user);
-  const docSuggestions = React.useMemo(() =>
-    documents.filter((d) => d.status !== 'trashed' && d.status !== 'archived').map((d) => d.title).filter(Boolean),
-    [documents]
-  );
 
   // Use backend unread count for the badge
   const pendingCount = unreadCount;
@@ -89,21 +82,6 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
         </p>
       </div>
 
-      {/* Search */}
-      <div className="hidden md:block w-64">
-        <AutocompleteSearch
-          value={searchQuery}
-          onChange={(val) => {
-            setSearchQuery(val);
-            if (val.trim()) navigate('documents');
-          }}
-          suggestions={docSuggestions}
-          placeholder={t('searchDocuments')}
-          className="bg-gray-100 dark:bg-[#2a2a2a] rounded-lg px-3 py-2"
-          inputClassName="dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500"
-        />
-      </div>
-
       {/* Dark Mode Toggle */}
       <button
         onClick={toggleTheme}
@@ -139,12 +117,13 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
                 <div className="px-4 py-6 text-center text-gray-500 dark:text-gray-400 text-sm">{t('noNotifications')}</div>
               ) : (
                 notifications.map((n) => {
-                  let icon, iconBg, label, onClick;
+                  let icon, iconBg, label, onClick, shouldDelete = false;
                   if (n.type === 'activity-log-export') {
                     icon = <FileText size={14} className="text-orange-600" />;
                     iconBg = 'bg-orange-100';
                     label = t('activityLogExport');
                     onClick = () => { navigate('activity-log'); setShowNotifications(false); };
+                    shouldDelete = true; // Delete this notification when clicked
                   } else if (n.type === 'delete-request') {
                     icon = <FileText size={14} className="text-red-600" />;
                     iconBg = 'bg-red-100';
@@ -170,7 +149,11 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
                     <button
                       key={n.id}
                       onClick={async () => {
-                        await markAsRead(n.id);
+                        if (shouldDelete) {
+                          await deleteNotification(n.id);
+                        } else {
+                          await markAsRead(n.id);
+                        }
                         onClick();
                       }}
                       className={`w-full flex items-start gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-left ${n.isRead ? 'opacity-60' : 'bg-[#f0fdf4]'}`}>

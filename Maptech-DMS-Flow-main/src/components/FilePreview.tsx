@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { FileText, Film, Maximize2, Minimize2, X } from 'lucide-react';
+import { FileText, Film, Maximize2, Minimize2, X, Hash, Building2, User, Calendar, FileType, Clock } from 'lucide-react';
 
 interface Props {
   doc?: any;
@@ -8,6 +8,95 @@ interface Props {
 const PREVIEW_TYPES = ['pdf', 'png', 'jpg', 'jpeg', 'mp4'];
 const OFFICE_TYPES = ['doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx'];
 const ARCHIVE_TYPES = ['zip'];
+
+// Document Info Panel Component
+const DocumentInfoPanel: React.FC<{ doc: any }> = ({ doc }) => {
+  const formatDate = (dateStr?: string) => {
+    if (!dateStr) return 'N/A';
+    return new Date(dateStr).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
+  const fileType = (doc?.fileType || doc?.file_type || '').toUpperCase();
+
+  return (
+    <div className="mt-4 bg-gray-50 rounded-xl p-4 border border-gray-100">
+      <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+        <FileText size={16} className="text-[#427A43]" />
+        Document Information
+      </h4>
+      <div className="grid grid-cols-2 gap-3 text-sm">
+        {/* Reference Number */}
+        <div className="flex items-start gap-2">
+          <Hash size={14} className="text-gray-400 mt-0.5 flex-shrink-0" />
+          <div>
+            <p className="text-xs text-gray-500">Reference</p>
+            <p className="font-medium text-gray-800">{doc.reference || 'N/A'}</p>
+          </div>
+        </div>
+
+        {/* Department */}
+        <div className="flex items-start gap-2">
+          <Building2 size={14} className="text-gray-400 mt-0.5 flex-shrink-0" />
+          <div>
+            <p className="text-xs text-gray-500">Department</p>
+            <p className="font-medium text-gray-800">{doc.department || 'N/A'}</p>
+          </div>
+        </div>
+
+        {/* Uploaded By */}
+        <div className="flex items-start gap-2">
+          <User size={14} className="text-gray-400 mt-0.5 flex-shrink-0" />
+          <div>
+            <p className="text-xs text-gray-500">Uploaded By</p>
+            <p className="font-medium text-gray-800">{doc.uploadedBy || doc.uploaded_by || 'N/A'}</p>
+          </div>
+        </div>
+
+        {/* File Type */}
+        <div className="flex items-start gap-2">
+          <FileType size={14} className="text-gray-400 mt-0.5 flex-shrink-0" />
+          <div>
+            <p className="text-xs text-gray-500">File Type</p>
+            <p className="font-medium text-gray-800">{fileType || 'N/A'}</p>
+          </div>
+        </div>
+
+        {/* Upload Date */}
+        <div className="flex items-start gap-2">
+          <Calendar size={14} className="text-gray-400 mt-0.5 flex-shrink-0" />
+          <div>
+            <p className="text-xs text-gray-500">Upload Date</p>
+            <p className="font-medium text-gray-800">{formatDate(doc.uploadedAt || doc.uploaded_at || doc.createdAt || doc.created_at)}</p>
+          </div>
+        </div>
+
+        {/* Status */}
+        <div className="flex items-start gap-2">
+          <Clock size={14} className="text-gray-400 mt-0.5 flex-shrink-0" />
+          <div>
+            <p className="text-xs text-gray-500">Status</p>
+            <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
+              doc.status === 'approved' ? 'bg-green-100 text-green-700' :
+              doc.status === 'pending' ? 'bg-yellow-100 text-yellow-700' :
+              doc.status === 'rejected' ? 'bg-red-100 text-red-700' :
+              doc.status === 'trashed' ? 'bg-gray-100 text-gray-700' :
+              doc.status === 'archived' ? 'bg-blue-100 text-blue-700' :
+              'bg-gray-100 text-gray-600'
+            }`}>
+              {doc.status ? doc.status.charAt(0).toUpperCase() + doc.status.slice(1) : 'N/A'}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const FilePreview: React.FC<Props> = ({ doc }) => {
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
@@ -129,6 +218,7 @@ const FilePreview: React.FC<Props> = ({ doc }) => {
             <Maximize2 size={18} />
           </button>
         </div>
+        <DocumentInfoPanel doc={doc} />
         {isFullscreen && (
           <div className="fixed inset-0 bg-black/90 z-[9999] flex items-center justify-center p-4">
             <button
@@ -158,6 +248,7 @@ const FilePreview: React.FC<Props> = ({ doc }) => {
             <Maximize2 size={18} />
           </button>
         </div>
+        <DocumentInfoPanel doc={doc} />
         {isFullscreen && (
           <div className="fixed inset-0 bg-black/95 z-[9999] flex flex-col">
             <div className="flex items-center justify-between p-4 bg-gray-900">
@@ -199,6 +290,7 @@ const FilePreview: React.FC<Props> = ({ doc }) => {
             <Maximize2 size={18} />
           </button>
         </div>
+        <DocumentInfoPanel doc={doc} />
         {isFullscreen && (
           <div className="fixed inset-0 bg-black z-[9999] flex items-center justify-center">
             <button
@@ -219,33 +311,39 @@ const FilePreview: React.FC<Props> = ({ doc }) => {
 
   if (isOffice && objectUrl) {
     return (
-      <div className="w-full h-[350px] flex flex-col items-center justify-center bg-gray-50 rounded-lg gap-3">
-        <FileText size={40} className="text-[#427A43]" />
-        <p className="text-sm text-gray-600 font-medium">{doc.title}.{fileType}</p>
-        <a
-          href={objectUrl}
-          download={`${doc.title}.${fileType}`}
-          className="px-4 py-2 bg-[#005F02] text-white text-sm rounded-lg hover:bg-[#427A43] transition-colors"
-        >
-          Download to Preview
-        </a>
-      </div>
+      <>
+        <div className="w-full h-[350px] flex flex-col items-center justify-center bg-gray-50 rounded-lg gap-3">
+          <FileText size={40} className="text-[#427A43]" />
+          <p className="text-sm text-gray-600 font-medium">{doc.title}.{fileType}</p>
+          <a
+            href={objectUrl}
+            download={`${doc.title}.${fileType}`}
+            className="px-4 py-2 bg-[#005F02] text-white text-sm rounded-lg hover:bg-[#427A43] transition-colors"
+          >
+            Download to Preview
+          </a>
+        </div>
+        <DocumentInfoPanel doc={doc} />
+      </>
     );
   }
 
   if (isArchive && objectUrl) {
     return (
-      <div className="w-full h-[350px] flex flex-col items-center justify-center bg-gray-50 rounded-lg gap-3">
-        <FileText size={40} className="text-[#427A43]" />
-        <p className="text-sm text-gray-600 font-medium">{doc.title}.{fileType}</p>
-        <a
-          href={objectUrl}
-          download={`${doc.title}.${fileType}`}
-          className="px-4 py-2 bg-[#005F02] text-white text-sm rounded-lg hover:bg-[#427A43] transition-colors"
-        >
-          Download File
-        </a>
-      </div>
+      <>
+        <div className="w-full h-[350px] flex flex-col items-center justify-center bg-gray-50 rounded-lg gap-3">
+          <FileText size={40} className="text-[#427A43]" />
+          <p className="text-sm text-gray-600 font-medium">{doc.title}.{fileType}</p>
+          <a
+            href={objectUrl}
+            download={`${doc.title}.${fileType}`}
+            className="px-4 py-2 bg-[#005F02] text-white text-sm rounded-lg hover:bg-[#427A43] transition-colors"
+          >
+            Download File
+          </a>
+        </div>
+        <DocumentInfoPanel doc={doc} />
+      </>
     );
   }
 

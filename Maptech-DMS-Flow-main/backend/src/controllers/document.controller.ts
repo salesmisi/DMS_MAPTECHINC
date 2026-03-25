@@ -92,7 +92,8 @@ export const createDocument = async (req: AuthRequest, res: Response) => {
       try {
         // Upsert counter
         const upsertRes = await pool.query(`
-          INSERT INTO document_counters (department_id, year, last_number) VALUES ($1, $2, 1)
+          INSERT INTO document_counters (id, department_id, year, last_number)
+          VALUES (uuid_generate_v4(), $1, $2, 1)
           ON CONFLICT (department_id, year) DO UPDATE SET last_number = document_counters.last_number + 1
           RETURNING last_number
         `, [deptId, year]);
@@ -230,12 +231,24 @@ export const rejectDocument = async (req: AuthRequest, res: Response) => {
 export const trashDocument = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
+    const userId = req.userId;
+
     const result = await pool.query(
-      `UPDATE documents SET status = 'trashed', trashed_at = NOW() WHERE id = $1 RETURNING *`,
-      [id]
+      `UPDATE documents SET status = 'trashed', trashed_at = NOW(), trashed_by = $2 WHERE id = $1 RETURNING *`,
+      [id, userId]
     );
+
     if (result.rows.length === 0) return res.status(404).json({ error: 'Document not found' });
-    return res.json({ message: 'Document trashed', document: result.rows[0] });
+
+    // Log to trash_history
+    const doc = result.rows[0];
+    await pool.query(
+      `INSERT INTO trash_history (target_type, target_id, target_name, action, performed_by, scheduled_deletion_at)
+       VALUES ('document', $1, $2, 'trashed', $3, NOW() + INTERVAL '30 days')`,
+      [doc.id, doc.title, userId]
+    );
+
+    return res.json({ message: 'Document trashed', document: doc });
   } catch (err: any) {
     console.error('trashDocument error:', err?.message || err);
     return res.status(500).json({ error: 'Server error' });
@@ -246,12 +259,68 @@ export const trashDocument = async (req: AuthRequest, res: Response) => {
 export const restoreDocument = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
+
+    // Get document details first
+    const docCheck = await pool.query('SELECT * FROM documents WHERE id = $1', [id]);
+    if (docCheck.rows.length === 0) return res.status(404).json({ error: 'Document not found' });
+
+    const doc = docCheck.rows[0];
+
+    // If document has a folder, check if folder exists and is active
+    if (doc.folder_id) {
+      const folderCheck = await pool.query('SELECT * FROM folders WHERE id = $1', [doc.folder_id]);
+
+      if (folderCheck.rows.length === 0) {
+        // Folder no longer exists, set folder_id to null
+        await pool.query('UPDATE documents SET folder_id = NULL WHERE id = $1', [id]);
+      } else {
+        const folder = folderCheck.rows[0];
+        // If folder is trashed, restore it first
+        if (folder.status === 'trashed') {
+          await pool.query(
+            `UPDATE folders SET status = 'active', trashed_at = NULL WHERE id = $1`,
+            [folder.id]
+          );
+        }
+      }
+    }
+
+    // If document belongs to a department, ensure department folder exists
+    if (doc.department) {
+      const deptFolderCheck = await pool.query(
+        'SELECT * FROM folders WHERE department = $1 AND is_department = TRUE',
+        [doc.department]
+      );
+
+      // If department folder exists and is trashed, restore it first
+      if (deptFolderCheck.rows.length > 0 && deptFolderCheck.rows[0].status === 'trashed') {
+        await pool.query(
+          `UPDATE folders SET status = 'active', trashed_at = NULL WHERE id = $1`,
+          [deptFolderCheck.rows[0].id]
+        );
+      }
+    }
+
+    // Now restore the document
     const result = await pool.query(
       `UPDATE documents SET status = 'approved', trashed_at = NULL, archived_at = NULL WHERE id = $1 RETURNING *`,
       [id]
     );
+
     if (result.rows.length === 0) return res.status(404).json({ error: 'Document not found' });
-    return res.json({ message: 'Document restored', document: result.rows[0] });
+
+    // Log to trash_history
+    await pool.query(
+      `INSERT INTO trash_history (target_type, target_id, target_name, action, performed_by, metadata)
+       VALUES ('document', $1, $2, 'restored', $3, $4)`,
+      [result.rows[0].id, result.rows[0].title, req.userId,
+       JSON.stringify({ department: doc.department })]
+    );
+
+    return res.json({
+      message: `Document restored to ${doc.department || 'its'} department`,
+      document: result.rows[0]
+    });
   } catch (err: any) {
     console.error('restoreDocument error:', err?.message || err);
     return res.status(500).json({ error: 'Server error' });
@@ -262,12 +331,50 @@ export const restoreDocument = async (req: AuthRequest, res: Response) => {
 export const permanentlyDeleteDocument = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
-    // Only admin can delete directly; staff must request approval
+
+    // Only admin can delete directly; must be in trash for at least 30 days OR admin override
     if (req.userRole !== 'admin') {
-      return res.status(403).json({ error: 'Only admins can delete documents directly. Please request deletion for admin approval.' });
+      return res.status(403).json({ error: 'Only admins can delete documents directly.' });
     }
-    const result = await pool.query('DELETE FROM documents WHERE id = $1 RETURNING id', [id]);
+
+    // Check if document is in trash
+    const docCheck = await pool.query(
+      'SELECT id, title, status, trashed_at FROM documents WHERE id = $1',
+      [id]
+    );
+
+    if (docCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+
+    const doc = docCheck.rows[0];
+
+    // Enforce 30-day retention unless admin override with force flag
+    const force = req.query.force === 'true';
+    if (doc.status === 'trashed' && doc.trashed_at && !force) {
+      const daysSinceTrashed = Math.floor(
+        (Date.now() - new Date(doc.trashed_at).getTime()) / (1000 * 60 * 60 * 24)
+      );
+
+      if (daysSinceTrashed < 30) {
+        return res.status(400).json({
+          error: `Document must remain in trash for 30 days. ${30 - daysSinceTrashed} days remaining.`,
+          daysRemaining: 30 - daysSinceTrashed,
+        });
+      }
+    }
+
+    // Perform permanent deletion
+    const result = await pool.query('DELETE FROM documents WHERE id = $1 RETURNING id, title', [id]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Document not found' });
+
+    // Log to trash_history
+    await pool.query(
+      `INSERT INTO trash_history (target_type, target_id, target_name, action, performed_by, actual_deletion_at)
+       VALUES ('document', $1, $2, 'permanently_deleted', $3, NOW())`,
+      [doc.id, doc.title, req.userId]
+    );
+
     return res.json({ message: 'Document permanently deleted' });
   } catch (err: any) {
     console.error('permanentlyDeleteDocument error:', err?.message || err);

@@ -54,8 +54,32 @@ function FolderNode({
   const hasChildren = children.length > 0;
   const isSelected = selectedFolderId === folder.id;
   const isDepartment = (folder as any).is_department || (folder as any).isDepartment || false;
-  let canDelete = user?.role === 'admin' || folder.createdById === user?.id;
-  if (isDepartment && user?.role !== 'admin') canDelete = false;
+  const isAdminCreated = folder.createdByRole === 'admin';
+
+  // Determine delete permissions:
+  // - Admin can always delete
+  // - Department folders: only admin can delete
+  // - Admin-created subfolders: only admin can delete (hide button for non-admins)
+  // - Staff-created folders: show delete request button (not direct delete)
+  let canDelete = false;
+  let canRequestDelete = false;
+
+  if (user?.role === 'admin') {
+    // Admin can delete any folder
+    canDelete = true;
+  } else if (isDepartment) {
+    // Department folders: no delete for non-admins
+    canDelete = false;
+    canRequestDelete = false;
+  } else if (isAdminCreated) {
+    // Admin-created subfolders: no delete button for non-admins
+    canDelete = false;
+    canRequestDelete = false;
+  } else if (folder.createdById === user?.id) {
+    // User's own folder: can request deletion
+    canDelete = false;
+    canRequestDelete = true;
+  }
   const depth = Math.min(level, MAX_LVL);
 
   return (
@@ -107,7 +131,7 @@ function FolderNode({
             <Trash2 size={12} />
           </button>
         )}
-        {canDelete && user?.role !== 'admin' && (
+        {canRequestDelete && (
           <button
             onClick={(e) => { e.stopPropagation(); setShowRequestDeleteModal(true); }}
             className={`ft-action ${

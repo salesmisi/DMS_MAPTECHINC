@@ -11,6 +11,8 @@ import {
   resetPassword,
   changePassword,
   uploadAvatar,
+  restoreUser,
+  permanentlyDeleteUser,
 } from '../controllers/user.controller';
 import { authenticate } from '../middleware/auth.middleware';
 
@@ -43,5 +45,7 @@ router.delete('/:id', authenticate, deleteUser);
 router.put('/:id/reset-password', authenticate, resetPassword);
 router.put('/:id/change-password', authenticate, changePassword);
 router.post('/:id/avatar', authenticate, avatarUpload.single('avatar'), uploadAvatar);
+router.patch('/:id/restore', authenticate, restoreUser);
+router.delete('/:id/permanent', authenticate, permanentlyDeleteUser);
 
 export default router;

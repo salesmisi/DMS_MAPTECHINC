@@ -1,27 +1,31 @@
-import React, { useState, Children } from 'react';
+import React, { useState, useMemo } from 'react';
 import RequestDeleteModal from '../components/RequestDeleteModal';
-import { AutocompleteSearch } from '../components/AutocompleteSearch';
 import {
-  Search,
-  Filter,
-  Grid,
-  List,
-  Upload,
-  FileText,
-  Download,
-  Edit2,
-  Trash2,
-  Archive,
-  Eye,
-  MoreVertical,
+  Home,
+  Star,
+  Clock,
   ChevronRight,
   ChevronDown,
   FolderOpen,
-  RefreshCw,
-  Lock,
+  Folder,
+  FileText,
+  File,
+  Image,
+  Film,
+  FileSpreadsheet,
   Plus,
-  X } from
-'lucide-react';
+  Upload,
+  Download,
+  Eye,
+  Trash2,
+  Archive,
+  MoreVertical,
+  Search,
+  Grid,
+  List,
+  Lock,
+  X
+} from 'lucide-react';
 import { useDocuments, Document } from '../context/DocumentContext';
 import { useAuth } from '../context/AuthContext';
 import { UploadModal } from '../components/UploadModal';
@@ -29,123 +33,164 @@ import { DeleteFolderModal } from '../components/DeleteFolderModal';
 import FilePreview from '../components/FilePreview';
 import { useNavigation } from '../App';
 import { useLanguage } from '../context/LanguageContext';
+import { CreateFolderModal } from '../components/CreateFolderModal';
+import { UnifiedSearch } from '../components/UnifiedSearch';
 
-// Recursive folder tree item component
-const DT_INDENT = 10;
-const DT_MAX = 6;
-
-interface FolderTreeItemProps {
-  folder: { id: string; name: string; parentId: string | null };
-  selectedFolder: string | null;
-  selectFolder: ((id: string | null) => void) | null;
-  getChildren: (parentId: string) => { id: string; name: string; parentId: string | null }[];
-  onCreateSubfolder: (parentId: string) => void;
-  level: number;
+// Quick Access folder card component
+interface QuickAccessCardProps {
+  name: string;
+  icon: React.ReactNode;
+  onClick: () => void;
+  isSelected?: boolean;
 }
 
-function FolderTreeItem({ folder, selectedFolder, selectFolder, getChildren, onCreateSubfolder, level }: FolderTreeItemProps) {
-  const [expanded, setExpanded] = React.useState(level < 2);
-  const [deleteModal, setDeleteModal] = React.useState(false);
-  const { deleteFolder, folders } = useDocuments();
-  const { user, users } = useAuth();
+function QuickAccessCard({ name, icon, onClick, isSelected }: QuickAccessCardProps) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex flex-col items-center justify-center p-4 rounded-lg transition-all min-w-[100px] ${
+        isSelected
+          ? 'bg-[#005F02]/20 dark:bg-[#005F02]/30 border-2 border-[#005F02]'
+          : 'bg-white dark:bg-[#2d2d2d] hover:bg-gray-100 dark:hover:bg-[#3d3d3d] border border-gray-200 dark:border-[#404040]'
+      }`}
+    >
+      <div className={`mb-2 ${isSelected ? 'text-[#005F02]' : 'text-[#dcb67a] dark:text-[#dcb67a]'}`}>
+        {icon}
+      </div>
+      <span className={`text-xs font-medium truncate max-w-[80px] ${
+        isSelected ? 'text-[#005F02] dark:text-[#427A43]' : 'text-gray-700 dark:text-gray-200'
+      }`}>
+        {name}
+      </span>
+    </button>
+  );
+}
+
+// Sidebar folder item
+interface SidebarFolderItemProps {
+  folder: {
+    id: string;
+    name: string;
+    parentId: string | null;
+    visibility?: string;
+    createdByRole?: 'admin' | 'manager' | 'staff';
+    isDepartment?: boolean;
+  };
+  selectedFolder: string | null;
+  selectFolder: (id: string | null) => void;
+  getChildren: (parentId: string) => {
+    id: string;
+    name: string;
+    parentId: string | null;
+    visibility?: string;
+    createdByRole?: 'admin' | 'manager' | 'staff';
+    isDepartment?: boolean;
+  }[];
+  level: number;
+  onCreateSubfolder: (parentId: string) => void;
+  onDeleteFolder: (folderId: string) => void;
+  userRole?: string;
+}
+
+function SidebarFolderItem({ folder, selectedFolder, selectFolder, getChildren, level, onCreateSubfolder, onDeleteFolder, userRole }: SidebarFolderItemProps) {
+  const [expanded, setExpanded] = useState(level < 1);
+  const [isHovered, setIsHovered] = useState(false);
   const children = getChildren(folder.id);
   const hasChildren = children.length > 0;
   const isSelected = selectedFolder === folder.id;
-  const depth = Math.min(level, DT_MAX);
-  // Find the full folder object to check isDepartment
-  const fullFolder = folders.find(f => f.id === folder.id) || (folder as any);
-  const isDepartment = fullFolder.isDepartment || fullFolder.is_department;
-  // Only admin can delete/rename department folders
-  const canDelete = !isDepartment || (user && user.role === 'admin');
+
+  // Lock logic:
+  // - Show lock if created by admin or manager
+  // - Show lock if it's an auto-generated department folder (isDepartment)
+  // - No lock if created by staff AND not a department folder
+  const showLock =
+    folder.createdByRole === 'admin' ||
+    folder.createdByRole === 'manager' ||
+    folder.isDepartment === true;
+
+  const canDelete = userRole === 'admin' || userRole === 'manager';
+
+  // Staff can add subfolders to locked folders (assigned to them)
+  // Admin/Manager can add subfolders to any folder
+  const canAddSubfolder = userRole === 'admin' || userRole === 'manager' || (userRole === 'staff' && showLock);
 
   return (
-    <div className="ft-node">
+    <div className="select-none">
       <div
-        className={`ft-row group ${
-          isSelected ? 'bg-[#427A43] text-white' : 'text-gray-600 hover:bg-gray-100'
+        className={`group flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer transition-colors ${
+          isSelected
+            ? 'bg-[#005F02]/20 dark:bg-[#005F02]/30 text-[#005F02] dark:text-[#427A43]'
+            : 'hover:bg-gray-100 dark:hover:bg-[#3d3d3d] text-gray-700 dark:text-gray-300'
         }`}
-        style={{ paddingLeft: `${4 + depth * DT_INDENT}px` }}
+        style={{ paddingLeft: `${8 + level * 16}px` }}
+        onClick={() => selectFolder(folder.id)}
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
       >
-        {/* Guide lines */}
-        {Array.from({ length: depth }, (_, i) => (
-          <span key={i} className="ft-guide" style={{ left: `${4 + (i + 1) * DT_INDENT - 5}px` }} />
-        ))}
-
         {hasChildren ? (
-          <button onClick={() => setExpanded(!expanded)} className="ft-chevron">
-            {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setExpanded(!expanded);
+            }}
+            className="p-0.5 hover:bg-gray-200 dark:hover:bg-[#4d4d4d] rounded"
+          >
+            {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           </button>
         ) : (
-          <span className="ft-spacer" />
+          <span className="w-5" />
+        )}
+        <Folder size={16} className={isSelected ? 'text-[#005F02]' : 'text-[#dcb67a]'} />
+        <span className="text-sm truncate flex-1">{folder.name}</span>
+
+        {/* Lock icon for admin/manager created or auto-generated folders */}
+        {showLock && (
+          <Lock size={12} className="text-yellow-500 flex-shrink-0" />
         )}
 
-        <button
-          onClick={() => selectFolder && selectFolder(isSelected ? null : folder.id)}
-          className="ft-name-btn"
-        >
-          <FolderOpen size={14} className="ft-icon" />
-          <span className="ft-label" title={folder.name}>{folder.name}</span>
-          {isDepartment && (
-            <span className="ml-2 text-xs text-gray-400 flex items-center" title="Department Folder — protected">
-              <Lock size={12} />
-            </span>
-          )}
-        </button>
-
-        <button
-          onClick={(e) => { e.stopPropagation(); onCreateSubfolder(folder.id); }}
-          className={`ft-action ${
-            isSelected ? 'hover:bg-white/20 text-white' : 'hover:bg-gray-200 text-gray-500'
-          }`}
-          title="Create subfolder"
-        >
-          <Plus size={12} />
-        </button>
-        {canDelete && (
-          <button
-            onClick={(e) => { e.stopPropagation(); setDeleteModal(true); }}
-            className={`ft-action ${
-              isSelected ? 'hover:bg-white/20 text-white' : 'hover:bg-red-100 text-red-400'
-            }`}
-            title="Delete folder"
-          >
-            <Trash2 size={12} />
-          </button>
+        {/* Action icons on hover */}
+        {isHovered && (canAddSubfolder || canDelete) && (
+          <div className="flex items-center gap-0.5 ml-auto">
+            {canAddSubfolder && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onCreateSubfolder(folder.id);
+                }}
+                className="p-1 hover:bg-gray-200 dark:hover:bg-[#4d4d4d] rounded text-gray-500 hover:text-[#005F02]"
+                title="Create subfolder"
+              >
+                <Plus size={14} />
+              </button>
+            )}
+            {canDelete && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDeleteFolder(folder.id);
+                }}
+                className="p-1 hover:bg-gray-200 dark:hover:bg-[#4d4d4d] rounded text-gray-500 hover:text-red-500"
+                title="Delete folder"
+              >
+                <Trash2 size={14} />
+              </button>
+            )}
+          </div>
         )}
       </div>
-
-      {deleteModal && (
-        <DeleteFolderModal
-          folderName={folder.name}
-          hasChildren={hasChildren}
-          childCount={children.length}
-          onConfirm={() => {
-            (async () => {
-              if (isSelected) selectFolder && selectFolder(null);
-              const res = await deleteFolder(folder.id);
-              if (res && res.status === 202) {
-                alert(res.message || 'Delete approval requested');
-              } else if (res && !res.ok) {
-                alert(res.error || 'Failed to delete folder');
-              }
-              setDeleteModal(false);
-            })();
-          }}
-          onCancel={() => setDeleteModal(false)}
-        />
-      )}
-
       {expanded && hasChildren && (
-        <div className="ft-children">
+        <div>
           {children.map((child) => (
-            <FolderTreeItem
+            <SidebarFolderItem
               key={child.id}
               folder={child}
               selectedFolder={selectedFolder}
               selectFolder={selectFolder}
               getChildren={getChildren}
-              onCreateSubfolder={onCreateSubfolder}
               level={level + 1}
+              onCreateSubfolder={onCreateSubfolder}
+              onDeleteFolder={onDeleteFolder}
+              userRole={userRole}
             />
           ))}
         </div>
@@ -154,205 +199,215 @@ function FolderTreeItem({ folder, selectedFolder, selectFolder, getChildren, onC
   );
 }
 
+// File type icon helper
+function getFileIcon(fileType: string, size: number = 20) {
+  const type = fileType.toLowerCase();
+  switch (type) {
+    case 'pdf':
+      return <FileText size={size} className="text-red-500" />;
+    case 'docx':
+    case 'doc':
+      return <FileText size={size} className="text-blue-500" />;
+    case 'xlsx':
+    case 'xls':
+      return <FileSpreadsheet size={size} className="text-green-600" />;
+    case 'jpg':
+    case 'jpeg':
+    case 'png':
+    case 'gif':
+    case 'tiff':
+      return <Image size={size} className="text-purple-500" />;
+    case 'mp4':
+    case 'mov':
+    case 'avi':
+    case 'mkv':
+      return <Film size={size} className="text-indigo-500" />;
+    default:
+      return <File size={size} className="text-gray-500" />;
+  }
+}
+
+// Format date helper
+function formatDateAccessed(dateString: string) {
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins} minute${diffMins > 1 ? 's' : ''} ago`;
+  if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+  if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+// Activity description helper
+function getActivityDescription(doc: Document) {
+  if (doc.scannedFrom) return 'Scanned document';
+  if (doc.status === 'pending') return 'Pending approval';
+  if (doc.status === 'approved') return 'Approved';
+  if (doc.status === 'rejected') return 'Rejected';
+  return 'Modified';
+}
+
 export function DocumentsPage() {
+  const { user } = useAuth();
   const {
     documents,
     folders,
+    addLog,
     trashDocument,
     archiveDocument,
-    addLog,
-    uploadNewVersion,
-    addFolder
+    deleteFolder,
+    addFolder,
+    updateDocument
   } = useDocuments();
-  const { user, users } = useAuth();
-  const { t } = useLanguage();
-  const [search, setSearch] = useState('');
-  const [filterDept, setFilterDept] = useState('all');
-  const [filterStatus, setFilterStatus] = useState('all');
-  const [filterType, setFilterType] = useState('all');
-  const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
-  // selectedFolder is shared via NavigationContext so other pages can set it
   const { selectedFolderId, selectFolder } = useNavigation();
-  const selectedFolder = selectedFolderId ?? null;
-  const visibleFolders = React.useMemo(() => {
-    if (!user) return [];
-    if (user.role === 'admin') return folders;
+  const { t } = useLanguage();
 
-    // Build a set of visible folder IDs including descendants
-    const visibleIds = new Set<string>();
-
-    // First pass: find all directly visible root/parent folders
-    const directlyVisible = folders.filter((folder) => {
-      const vis = (folder as any).visibility || 'private';
-      if (vis === 'admin-only') return false;
-      if (user.role === 'manager') {
-        return String(folder.department || '').trim().toLowerCase() === String(user.department || '').trim().toLowerCase();
-      }
-      if (user.role === 'staff') {
-        if (vis === 'department' && String(folder.department || '').trim().toLowerCase() === String(user.department || '').trim().toLowerCase()) return true;
-        if (vis === 'private' && String(folder.createdById || '') === String(user.id || '')) return true;
-        return false;
-      }
-      return false;
-    });
-
-    directlyVisible.forEach((f) => visibleIds.add(f.id));
-
-    // Second pass: recursively add all descendants of visible folders
-    const addDescendants = (parentId: string) => {
-      folders.forEach((f) => {
-        if (f.parentId === parentId && !visibleIds.has(f.id)) {
-          visibleIds.add(f.id);
-          addDescendants(f.id);
-        }
-      });
-    };
-
-    directlyVisible.forEach((f) => addDescendants(f.id));
-
-    // Third pass: add ancestors of visible folders (so tree structure is complete)
-    const addAncestors = (folderId: string) => {
-      const folder = folders.find((f) => f.id === folderId);
-      if (folder?.parentId && !visibleIds.has(folder.parentId)) {
-        visibleIds.add(folder.parentId);
-        addAncestors(folder.parentId);
-      }
-    };
-
-    directlyVisible.forEach((f) => addAncestors(f.id));
-
-    return folders.filter((f) => visibleIds.has(f.id));
-  }, [folders, user]);
+  // State
+  const [activeTab, setActiveTab] = useState<'recent' | 'favorites'>('recent');
+  const [search, setSearch] = useState('');
+  const [searchSelectedDocId, setSearchSelectedDocId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
   const [showUpload, setShowUpload] = useState(false);
-  const [actionDoc, setActionDoc] = useState<string | null>(null);
+  const [showCreateFolder, setShowCreateFolder] = useState(false);
+  const [newFolderParentId, setNewFolderParentId] = useState<string | null>(null);
   const [viewingDoc, setViewingDoc] = useState<Document | null>(null);
   const [trashTarget, setTrashTarget] = useState<Document | null>(null);
-  const [showCreateFolder, setShowCreateFolder] = useState(false);
-  const [newFolderName, setNewFolderName] = useState('');
-  const [newFolderParentId, setNewFolderParentId] = useState<string | null>(null);
-  const departments = React.useMemo(() => {
-    // derive departments from root folders that are marked as department (locked)
-    // and only include those that also have at least one assigned user
-    if (!folders || folders.length === 0) return [];
-    const rootDeptSet = new Set<string>();
-    folders.forEach((f) => {
-      const isDept = (f as any).is_department || (f as any).isDepartment || false;
-      if ((!f.parentId && f.parent_id === undefined) || f.parentId === null || f.parent_id === null) {
-        if (isDept) {
-          const d = String(f.department || f.name || '').trim();
-          if (d) rootDeptSet.add(d);
-        }
-      }
-    });
-    if (!users || users.length === 0) return Array.from(rootDeptSet).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
-    const userDeptSet = new Set<string>();
-    users.forEach((u: any) => {
-      const d = String(u.department || '').trim();
-      if (d) userDeptSet.add(d);
-    });
-    const intersection = Array.from(rootDeptSet).filter((d) => userDeptSet.has(d));
-    return intersection.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
-  }, [folders, users]);
+  const [actionDoc, setActionDoc] = useState<Document | null>(null);
+  const [requestDeleteModal, setRequestDeleteModal] = useState(false);
+  const [deleteModal, setDeleteModal] = useState(false);
+  const [deleteFolderId, setDeleteFolderId] = useState<string | null>(null);
 
-  const activeDocuments = documents.filter((d) => d.status !== 'trashed' && d.status !== 'archived');
+  // Sidebar resize state
+  const [sidebarWidth, setSidebarWidth] = useState(224);
+  const isResizing = React.useRef(false);
 
-  // Build a set of visible folder IDs for quick lookup
-  const visibleFolderIds = React.useMemo(() => {
-    return new Set(visibleFolders.map((f) => f.id));
-  }, [visibleFolders]);
+  const handleMouseDown = (e: React.MouseEvent) => {
+    isResizing.current = true;
+    e.preventDefault();
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
 
-  // Role-based document visibility:
-  // admin -> all documents
-  // manager -> documents in their department OR in any visible folder
-  // staff -> documents they uploaded OR in their department OR in any visible folder
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!isResizing.current) return;
+      const newWidth = Math.min(Math.max(ev.clientX, 150), 400);
+      setSidebarWidth(newWidth);
+    };
+
+    const onMouseUp = () => {
+      isResizing.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  };
+
+  // Filter documents based on user role
+  const activeDocuments = useMemo(() => {
+    return documents.filter(d => d.status !== 'archived' && d.status !== 'trashed');
+  }, [documents]);
+
+  // Role-based folder visibility
+  const visibleFolders = useMemo(() => {
+    if (!user) return [];
+    if (user.role === 'admin') return folders;
+    if (user.role === 'manager') {
+      return folders.filter(f => f.department === user.department || !f.department);
+    }
+    return folders.filter(f => f.department === user.department || !f.department);
+  }, [folders, user]);
+
+  const rootFolders = visibleFolders.filter(f => f.parentId === null);
+  const getChildren = (parentId: string) => visibleFolders.filter(f => f.parentId === parentId);
+
+  // Document access check
   const hasDocumentAccess = (doc: Document) => {
     if (!user) return false;
     if (user.role === 'admin') return true;
+    // Check if user uploaded the document (using uploadedById not uploadedBy)
+    if (doc.uploadedById === user.id) return true;
+    if (user.role === 'manager' && doc.department === user.department) return true;
 
-    // Check if document is in a visible folder
-    const inVisibleFolder = doc.folderId && visibleFolderIds.has(doc.folderId);
+    // Staff access logic
+    if (user.role === 'staff' && doc.department === user.department) {
+      // Staff can see scanned documents OR approved documents from their own department only
+      if (doc.scannedFrom || doc.status === 'approved') return true;
+    }
+    return false;
+  };
 
-    if (user.role === 'manager') {
-      return doc.department === user.department || inVisibleFolder;
+  // Filter documents
+  const filtered = useMemo(() => {
+    let result = activeDocuments.filter(d => hasDocumentAccess(d));
+
+    // Filter by selected folder
+    if (selectedFolderId) {
+      result = result.filter(d => d.folderId === selectedFolderId);
     }
 
-    // staff: allow staff to see documents in their department, their uploads, or in visible folders
-    return doc.uploadedById === user.id ||
-           String(doc.department || '').trim().toLowerCase() === String(user.department || '').trim().toLowerCase() ||
-           inVisibleFolder;
+    // Filter by search
+    if (search) {
+      const searchLower = search.toLowerCase();
+      result = result.filter(d =>
+        d.title.toLowerCase().includes(searchLower) ||
+        d.reference?.toLowerCase().includes(searchLower) ||
+        d.department?.toLowerCase().includes(searchLower)
+      );
+    }
+
+    // If a specific document was selected from search, prioritize it
+    if (searchSelectedDocId) {
+      const selectedDoc = result.find(d => d.id === searchSelectedDocId);
+      if (selectedDoc) {
+        result = [selectedDoc, ...result.filter(d => d.id !== searchSelectedDocId)];
+      }
+    }
+
+    // Filter by tab
+    if (activeTab === 'recent') {
+      result = result.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    } else if (activeTab === 'favorites') {
+      result = result.filter(d => d.isFavorite);
+    }
+
+    return result;
+  }, [activeDocuments, selectedFolderId, search, searchSelectedDocId, activeTab, user]);
+
+  // Quick access folders (top 8 root folders)
+  const quickAccessFolders = useMemo(() => {
+    return rootFolders.slice(0, 8);
+  }, [rootFolders]);
+
+  // Handlers
+  const handleFolderSelect = (folderId: string | null) => {
+    if (selectFolder) {
+      selectFolder(folderId);
+      if (folderId) {
+        const folder = visibleFolders.find(f => f.id === folderId);
+        addLog({
+          userId: user?.id || '',
+          userName: user?.name || '',
+          userRole: user?.role || '',
+          action: 'FOLDER_ACCESSED',
+          target: folder?.name || folderId,
+          targetType: 'folder',
+          timestamp: new Date().toISOString(),
+          ipAddress: '192.168.1.100',
+          details: `Accessed folder: ${folder?.name || folderId}`
+        });
+      }
+    }
   };
 
-  const filtered = activeDocuments.filter((doc) => {
-    const matchSearch =
-    !search ||
-    doc.title.toLowerCase().includes(search.toLowerCase()) ||
-    doc.reference.toLowerCase().includes(search.toLowerCase());
-    const matchDept = filterDept === 'all' || doc.department === filterDept;
-    const matchStatus = filterStatus === 'all' || doc.status === filterStatus;
-    const matchType = filterType === 'all' || doc.fileType === filterType;
-    const matchFolder = !selectedFolder || (doc.folderId && doc.folderId === selectedFolder);
-    return matchSearch && matchDept && matchStatus && matchType && matchFolder && hasDocumentAccess(doc);
-  });
-
-  const searchSuggestions = React.useMemo(() =>
-    activeDocuments.filter(d => hasDocumentAccess(d)).flatMap((d) => [d.title, d.reference]).filter(Boolean),
-    [activeDocuments, user]
-  );
-  const rootFolders = visibleFolders.filter((f) => f.parentId === null);
-  const getChildren = (parentId: string) => visibleFolders.filter((f) => f.parentId === parentId);
-  const statusBadge = (status: string) => {
-    const map: Record<string, string> = {
-      pending: 'bg-yellow-100 text-yellow-700',
-      approved: 'bg-green-100 text-green-700',
-      rejected: 'bg-red-100 text-red-700',
-      archived: 'bg-blue-100 text-blue-700'
-    };
-    return map[status] || 'bg-gray-100 text-gray-600';
-  };
-  const fileTypeColors: Record<string, string> = {
-    pdf: 'bg-red-100 text-red-700',
-    docx: 'bg-blue-100 text-blue-700',
-    xlsx: 'bg-green-100 text-green-700',
-    jpg: 'bg-purple-100 text-purple-700',
-    png: 'bg-pink-100 text-pink-700',
-    tiff: 'bg-cyan-100 text-cyan-700',
-    mp4: 'bg-indigo-100 text-indigo-700',
-    mov: 'bg-indigo-100 text-indigo-700',
-    avi: 'bg-indigo-100 text-indigo-700',
-    mkv: 'bg-indigo-100 text-indigo-700'
-  };
-  const handleTrash = (doc: Document) => {
-    setTrashTarget(doc);
-    setActionDoc(null);
-  };
-  const confirmTrash = (doc: Document) => {
-    trashDocument(doc.id);
-    addLog({
-      userId: user?.id || '',
-      userName: user?.name || '',
-      userRole: user?.role || '',
-      action: 'DOCUMENT_TRASHED',
-      target: doc.title,
-      targetType: 'document',
-      timestamp: new Date().toISOString(),
-      ipAddress: '192.168.1.100'
-    });
-    setTrashTarget(null);
-  };
-  const handleArchive = (doc: Document) => {
-    archiveDocument(doc.id);
-    addLog({
-      userId: user?.id || '',
-      userName: user?.name || '',
-      userRole: user?.role || '',
-      action: 'DOCUMENT_ARCHIVED',
-      target: doc.title,
-      targetType: 'document',
-      timestamp: new Date().toISOString(),
-      ipAddress: '192.168.1.100'
-    });
-    setActionDoc(null);
-  };
   const handleView = (doc: Document) => {
     setViewingDoc(doc);
     addLog({
@@ -367,6 +422,7 @@ export function DocumentsPage() {
       details: `Viewed document: ${doc.reference} in folder ${doc.folderId || 'root'}`
     });
   };
+
   const handleDownload = async (doc: Document) => {
     try {
       const token = localStorage.getItem('dms_token');
@@ -398,572 +454,491 @@ export function DocumentsPage() {
       alert('Failed to download file.');
     }
   };
-  const [sidebarWidth, setSidebarWidth] = useState(224);
-  const isResizing = React.useRef(false);
 
-  const handleMouseDown = (e: React.MouseEvent) => {
-    isResizing.current = true;
-    e.preventDefault();
-    const onMouseMove = (ev: MouseEvent) => {
-      if (!isResizing.current) return;
-      const newWidth = Math.min(Math.max(ev.clientX - 16, 160), 480);
-      setSidebarWidth(newWidth);
-    };
-    const onMouseUp = () => {
-      isResizing.current = false;
-      document.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseup', onMouseUp);
-    };
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
+  const handleTrash = (doc: Document) => {
+    setTrashTarget(doc);
+    setActionDoc(null);
   };
 
-  // Wrapper for folder selection with activity logging
-  const handleFolderSelect = (folderId: string | null) => {
-    if (selectFolder) {
-      selectFolder(folderId);
-      if (folderId) {
-        const folder = visibleFolders.find(f => f.id === folderId);
-        addLog({
-          userId: user?.id || '',
-          userName: user?.name || '',
-          userRole: user?.role || '',
-          action: 'FOLDER_ACCESSED',
-          target: folder?.name || folderId,
-          targetType: 'folder',
-          timestamp: new Date().toISOString(),
-          ipAddress: '192.168.1.100',
-          details: `Accessed folder: ${folder?.name || folderId}`
-        });
-      }
-    }
+  const confirmTrash = (doc: Document) => {
+    trashDocument(doc.id);
+    addLog({
+      userId: user?.id || '',
+      userName: user?.name || '',
+      userRole: user?.role || '',
+      action: 'DOCUMENT_TRASHED',
+      target: doc.title,
+      targetType: 'document',
+      timestamp: new Date().toISOString(),
+      ipAddress: '192.168.1.100'
+    });
+    setTrashTarget(null);
+  };
+
+  const handleArchive = (doc: Document) => {
+    archiveDocument(doc.id);
+    addLog({
+      userId: user?.id || '',
+      userName: user?.name || '',
+      userRole: user?.role || '',
+      action: 'DOCUMENT_ARCHIVED',
+      target: doc.title,
+      targetType: 'document',
+      timestamp: new Date().toISOString(),
+      ipAddress: '192.168.1.100'
+    });
+    setActionDoc(null);
+  };
+
+  const handleToggleFavorite = (doc: Document) => {
+    updateDocument(doc.id, { isFavorite: !doc.isFavorite });
+    addLog({
+      userId: user?.id || '',
+      userName: user?.name || '',
+      userRole: user?.role || '',
+      action: doc.isFavorite ? 'DOCUMENT_UNFAVORITED' : 'DOCUMENT_FAVORITED',
+      target: doc.title,
+      targetType: 'document',
+      timestamp: new Date().toISOString(),
+      ipAddress: '192.168.1.100'
+    });
+  };
+
+  const getFolderName = (folderId: string | null) => {
+    if (!folderId) return 'All Documents';
+    const folder = visibleFolders.find(f => f.id === folderId);
+    return folder?.name || 'Unknown Folder';
   };
 
   return (
-    <div className="flex gap-6 h-full">
-      {/* Folder Tree Sidebar */}
-      <div className="ft-container flex-shrink-0 bg-white rounded-xl shadow-sm border border-gray-100 p-3 relative" style={{ width: sidebarWidth }}>
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-            <FolderOpen size={16} className="text-[#427A43]" />
-            Folders
-          </h3>
-            {user?.role !== 'staff' && (
-              <button
-                onClick={() => setShowCreateFolder(true)}
-                className="p-1 rounded-md bg-[#005F02] text-white hover:bg-[#427A43] transition-colors"
-                title="Create Folder">
-                <Plus size={14} />
-              </button>
-            )}
+    <div className="flex h-full bg-[#f3f3f3] dark:bg-[#191919]">
+      {/* Left Sidebar - Windows Explorer Style */}
+      <div
+        className="flex-shrink-0 bg-[#f9f9f9] dark:bg-[#202020] border-r border-gray-200 dark:border-[#333] overflow-y-auto relative"
+        style={{ width: sidebarWidth }}
+      >
+        <div className="p-2">
+          {/* Home */}
+          <div
+            className={`flex items-center gap-3 px-3 py-2 rounded cursor-pointer transition-colors ${
+              !selectedFolderId
+                ? 'bg-[#005F02]/20 dark:bg-[#005F02]/30 text-[#005F02] dark:text-[#427A43]'
+                : 'hover:bg-gray-100 dark:hover:bg-[#3d3d3d] text-gray-700 dark:text-gray-300'
+            }`}
+            onClick={() => handleFolderSelect(null)}
+          >
+            <Home size={18} className={!selectedFolderId ? 'text-[#005F02]' : 'text-gray-500 dark:text-gray-400'} />
+            <span className="text-sm font-medium">Home</span>
+          </div>
+
+          {/* Divider */}
+          <div className="my-2 border-t border-gray-200 dark:border-[#333]" />
+
+          {/* Folders List */}
+          <div className="space-y-0.5">
+            {rootFolders.map((folder) => (
+              <SidebarFolderItem
+                key={folder.id}
+                folder={folder}
+                selectedFolder={selectedFolderId}
+                selectFolder={handleFolderSelect}
+                getChildren={getChildren}
+                level={0}
+                onCreateSubfolder={(parentId) => {
+                  setNewFolderParentId(parentId);
+                  setShowCreateFolder(true);
+                }}
+                onDeleteFolder={(folderId) => {
+                  setDeleteFolderId(folderId);
+                }}
+                userRole={user?.role}
+              />
+            ))}
+          </div>
         </div>
-        <div
-          className={`ft-row cursor-pointer mb-1 ${
-            !selectedFolder ? 'bg-[#005F02] text-white' : 'text-gray-600 hover:bg-gray-100'
-          }`}
-          style={{ paddingLeft: '4px' }}
-          onClick={() => handleFolderSelect(null)}
-        >
-          <FolderOpen size={14} className="ft-icon" />
-          <span className="ft-label">All Documents</span>
-        </div>
-        <div className="ft-scroll">
-          {rootFolders.map((folder) =>
-          <FolderTreeItem
-            key={folder.id}
-            folder={folder}
-            selectedFolder={selectedFolder}
-            selectFolder={handleFolderSelect}
-            getChildren={getChildren}
-            onCreateSubfolder={(parentId) => {
-              setNewFolderParentId(parentId);
-              setShowCreateFolder(true);
-            }}
-            level={0}
-          />
-          )}
-        </div>
-        {/* Resize handle */}
+
+        {/* Resize Handle */}
         <div
           onMouseDown={handleMouseDown}
-          className="absolute top-0 right-0 w-1.5 h-full cursor-col-resize hover:bg-[#427A43]/30 rounded-r-xl transition-colors"
+          className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-[#005F02]/50 active:bg-[#005F02] transition-colors"
+          title="Drag to resize"
         />
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 min-w-0 space-y-4">
-        {/* Toolbar */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-          <div className="flex flex-wrap items-center gap-3">
-            {/* Search */}
-            <AutocompleteSearch
-              value={search}
-              onChange={setSearch}
-              suggestions={searchSuggestions}
-              placeholder="Search by title or reference..."
-              className="bg-gray-100 rounded-lg px-3 py-2 flex-1 min-w-48"
-            />
-
-            {/* Filters */}
-            <select
-              value={filterDept}
-              onChange={(e) => setFilterDept(e.target.value)}
-              className="text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#427A43]">
-
-              <option value="all">All Departments</option>
-              {departments.map((d) =>
-              <option key={d} value={d}>
-                  {d}
-                </option>
-              )}
-            </select>
-
-            <select
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value)}
-              className="text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#427A43]">
-
-              <option value="all">All Status</option>
-              <option value="pending">Pending</option>
-              <option value="approved">Approved</option>
-              <option value="rejected">Rejected</option>
-            </select>
-
-            <select
-              value={filterType}
-              onChange={(e) => setFilterType(e.target.value)}
-              className="text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#427A43]">
-
-              <option value="all">All Types</option>
-              <option value="pdf">PDF</option>
-              <option value="docx">DOCX</option>
-              <option value="xlsx">XLSX</option>
-              <option value="jpg">JPG</option>
-              <option value="png">PNG</option>
-              <option value="mp4">MP4</option>
-              <option value="mov">MOV</option>
-              <option value="avi">AVI</option>
-              <option value="mkv">MKV</option>
-            </select>
-
-            <div className="flex items-center gap-1 ml-auto">
-              <button
-                onClick={() => setViewMode('list')}
-                className={`p-2 rounded-lg transition-colors ${viewMode === 'list' ? 'bg-[#005F02] text-white' : 'text-gray-500 hover:bg-gray-100'}`}>
-
-                <List size={16} />
-              </button>
-              <button
-                onClick={() => setViewMode('grid')}
-                className={`p-2 rounded-lg transition-colors ${viewMode === 'grid' ? 'bg-[#005F02] text-white' : 'text-gray-500 hover:bg-gray-100'}`}>
-
-                <Grid size={16} />
-              </button>
-            </div>
-
-            <button
-              onClick={() => setShowUpload(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-[#005F02] text-white text-sm font-medium rounded-lg hover:bg-[#427A43] transition-colors">
-
-              <Upload size={16} />
-              Upload
-            </button>
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        {/* Quick Access Section */}
+        <div className="p-4 bg-[#f3f3f3] dark:bg-[#191919]">
+          <h2 className="text-sm font-semibold text-gray-600 dark:text-gray-400 mb-3">Quick access</h2>
+          <div className="flex gap-3 overflow-x-auto pb-2">
+            {quickAccessFolders.map((folder) => (
+              <QuickAccessCard
+                key={folder.id}
+                name={folder.name}
+                icon={<Folder size={32} />}
+                onClick={() => handleFolderSelect(folder.id)}
+                isSelected={selectedFolderId === folder.id}
+              />
+            ))}
+            {quickAccessFolders.length === 0 && (
+              <div className="text-sm text-gray-500 dark:text-gray-400 py-4">
+                No folders available
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Results Count */}
-        <p className="text-sm text-gray-500 px-1">
-          Showing{' '}
-          <span className="font-medium text-gray-700">{filtered.length}</span>{' '}
-          documents
-        </p>
+        {/* Tabs and Search Bar */}
+        <div className="px-4 pb-2 bg-[#f3f3f3] dark:bg-[#191919]">
+          <div className="flex items-center justify-between border-b border-gray-200 dark:border-[#333]">
+            {/* Tabs */}
+            <div className="flex gap-1">
+              <button
+                onClick={() => setActiveTab('recent')}
+                className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
+                  activeTab === 'recent'
+                    ? 'text-[#005F02] dark:text-[#427A43] border-[#005F02]'
+                    : 'text-gray-600 dark:text-gray-400 border-transparent hover:text-gray-900 dark:hover:text-gray-200'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <Clock size={16} />
+                  Recent
+                </div>
+              </button>
+              <button
+                onClick={() => setActiveTab('favorites')}
+                className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
+                  activeTab === 'favorites'
+                    ? 'text-[#005F02] dark:text-[#427A43] border-[#005F02]'
+                    : 'text-gray-600 dark:text-gray-400 border-transparent hover:text-gray-900 dark:hover:text-gray-200'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <Star size={16} />
+                  Favorites
+                </div>
+              </button>
+            </div>
 
-        {/* Document List */}
-        {viewMode === 'list' ?
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+            {/* Actions */}
+            <div className="flex items-center gap-2">
+              {/* Unified Search - searches folders and documents */}
+              <UnifiedSearch
+                documents={activeDocuments.map(d => ({
+                  id: d.id,
+                  title: d.title,
+                  reference: d.reference,
+                  department: d.department,
+                }))}
+                folders={folders
+                  .filter(f => !f.status || f.status !== 'trashed')
+                  .map(f => ({
+                    id: f.id,
+                    name: f.name,
+                    department: f.department,
+                  }))}
+                onSelectFolder={(folderId) => {
+                  selectFolder(folderId);
+                  setSearch('');
+                  setSearchSelectedDocId(null);
+                }}
+                onSelectDocument={(docId) => {
+                  setSearchSelectedDocId(docId);
+                  const doc = activeDocuments.find(d => d.id === docId);
+                  if (doc) {
+                    setSearch(doc.title);
+                    setViewingDoc(doc);
+                  }
+                }}
+                onSearch={(query) => {
+                  setSearch(query);
+                  if (!query) setSearchSelectedDocId(null);
+                }}
+                placeholder="Search files and folders..."
+                className="w-64"
+              />
+
+              {/* View Toggle */}
+              <div className="flex items-center border border-gray-200 dark:border-[#404040] rounded-md overflow-hidden">
+                <button
+                  onClick={() => setViewMode('list')}
+                  className={`p-1.5 ${viewMode === 'list' ? 'bg-[#005F02] text-white' : 'bg-white dark:bg-[#2d2d2d] text-gray-500 dark:text-gray-400'}`}
+                >
+                  <List size={16} />
+                </button>
+                <button
+                  onClick={() => setViewMode('grid')}
+                  className={`p-1.5 ${viewMode === 'grid' ? 'bg-[#005F02] text-white' : 'bg-white dark:bg-[#2d2d2d] text-gray-500 dark:text-gray-400'}`}
+                >
+                  <Grid size={16} />
+                </button>
+              </div>
+
+              {/* Upload Button */}
+              <button
+                onClick={() => setShowUpload(true)}
+                className="flex items-center gap-2 px-3 py-1.5 bg-[#005F02] text-white text-sm font-medium rounded-md hover:bg-[#427A43] transition-colors"
+              >
+                <Upload size={16} />
+                Upload
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Current Location */}
+        <div className="px-4 py-2 bg-[#f3f3f3] dark:bg-[#191919]">
+          <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+            <FolderOpen size={16} className="text-[#dcb67a]" />
+            <span>{getFolderName(selectedFolderId)}</span>
+            <span className="text-gray-400 dark:text-gray-500">•</span>
+            <span className="text-gray-500 dark:text-gray-500">{filtered.length} items</span>
+          </div>
+        </div>
+
+        {/* File List */}
+        <div className="flex-1 overflow-auto bg-white dark:bg-[#1e1e1e] mx-4 mb-4 rounded-lg border border-gray-200 dark:border-[#333]">
+          {viewMode === 'list' ? (
             <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-gray-50 border-b border-gray-100">
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                    Document
+              <thead className="sticky top-0 bg-[#f5f5f5] dark:bg-[#2d2d2d] border-b border-gray-200 dark:border-[#404040]">
+                <tr>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide">
+                    Name
                   </th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide hidden md:table-cell">
-                    Department
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide w-44">
+                    Date accessed
                   </th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide hidden lg:table-cell">
-                    Date
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide w-40">
+                    Activity
                   </th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                    Status
-                  </th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide hidden lg:table-cell">
-                    Version
-                  </th>
-                  <th className="px-4 py-3"></th>
+                  <th className="px-4 py-2.5 w-24"></th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-50">
-                {filtered.length === 0 ?
-              <tr>
-                    <td colSpan={6} className="py-12 text-center text-gray-400">
-                      <FileText size={40} className="mx-auto mb-3 opacity-30" />
-                      <p>No documents found</p>
+              <tbody className="divide-y divide-gray-100 dark:divide-[#333]">
+                {filtered.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="py-16 text-center">
+                      <FileText size={48} className="mx-auto mb-4 text-gray-300 dark:text-gray-600" />
+                      <p className="text-gray-500 dark:text-gray-400">No documents found</p>
+                      <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
+                        Upload documents or select a different folder
+                      </p>
                     </td>
-                  </tr> :
-
-              filtered.map((doc) =>
-              <tr
-                key={doc.id}
-                className="hover:bg-gray-50 transition-colors">
-
+                  </tr>
+                ) : (
+                  filtered.map((doc) => (
+                    <tr
+                      key={doc.id}
+                      className="hover:bg-gray-50 dark:hover:bg-[#2a2a2a] transition-colors cursor-pointer"
+                      onClick={() => handleView(doc)}
+                    >
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">
-                          <span
-                      className={`px-1.5 py-0.5 rounded text-xs font-bold uppercase ${fileTypeColors[doc.fileType] || 'bg-gray-100 text-gray-600'}`}>
-
-                            {doc.fileType}
-                          </span>
+                          {getFileIcon(doc.fileType)}
                           <div className="min-w-0">
-                            <p className="font-medium text-gray-800 truncate max-w-48">
-                              {doc.title}
-                            </p>
-                            <p className="text-xs text-gray-400">
-                              {doc.reference}
-                            </p>
+                            <div className="flex items-center gap-2">
+                              <p className="font-medium text-gray-800 dark:text-gray-200 truncate">
+                                {doc.title}
+                              </p>
+                              {doc.isEncrypted && (
+                                <Lock size={12} className="text-yellow-500 flex-shrink-0" />
+                              )}
+                            </div>
+                            <p className="text-xs text-gray-400 dark:text-gray-500">{doc.reference}</p>
                           </div>
-                          {doc.isEncrypted &&
-                    <Lock
-                      size={12}
-                      className="text-yellow-500 flex-shrink-0" />
-
-                    }
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-gray-600 hidden md:table-cell">
-                        {doc.department}
-                      </td>
-                      <td className="px-4 py-3 text-gray-500 hidden lg:table-cell">
-                        {doc.date}
+                      <td className="px-4 py-3 text-gray-500 dark:text-gray-400">
+                        {formatDateAccessed(doc.date)}
                       </td>
                       <td className="px-4 py-3">
-                        <span
-                    className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusBadge(doc.status)}`}>
-
-                          {doc.status}
+                        <span className={`text-sm ${
+                          doc.status === 'approved' ? 'text-green-600 dark:text-green-400' :
+                          doc.status === 'pending' ? 'text-yellow-600 dark:text-yellow-400' :
+                          doc.status === 'rejected' ? 'text-red-600 dark:text-red-400' :
+                          'text-gray-500 dark:text-gray-400'
+                        }`}>
+                          {getActivityDescription(doc)}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-gray-500 hidden lg:table-cell">
-                        v{doc.version}
-                      </td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-1 justify-end">
+                        <div className="flex items-center gap-1 justify-end" onClick={(e) => e.stopPropagation()}>
                           <button
-                      onClick={() => handleView(doc)}
-                      className="p-1.5 text-gray-400 hover:text-[#005F02] hover:bg-green-50 rounded transition-colors"
-                      title="View">
-
-                            <Eye size={15} />
+                            onClick={() => handleToggleFavorite(doc)}
+                            className={`p-1.5 rounded transition-colors ${
+                              doc.isFavorite
+                                ? 'text-yellow-500 hover:text-yellow-600'
+                                : 'text-gray-400 hover:text-yellow-500 hover:bg-yellow-50 dark:hover:bg-yellow-900/30'
+                            }`}
+                            title={doc.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+                          >
+                            <Star size={16} fill={doc.isFavorite ? 'currentColor' : 'none'} />
                           </button>
                           <button
-                      onClick={() => handleDownload(doc)}
-                      className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                      title="Download">
-
-                            <Download size={15} />
+                            onClick={() => handleView(doc)}
+                            className="p-1.5 text-gray-400 hover:text-[#005F02] hover:bg-green-50 dark:hover:bg-green-900/30 rounded transition-colors"
+                            title="View"
+                          >
+                            <Eye size={16} />
+                          </button>
+                          <button
+                            onClick={() => handleDownload(doc)}
+                            className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors"
+                            title="Download"
+                          >
+                            <Download size={16} />
                           </button>
                           {user?.role === 'admin' && (
                             <>
                               <button
                                 onClick={() => handleArchive(doc)}
-                                className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors"
-                                title="Archive">
-                                <Archive size={15} />
+                                className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/30 rounded transition-colors"
+                                title="Archive"
+                              >
+                                <Archive size={16} />
                               </button>
                               <button
                                 onClick={() => handleTrash(doc)}
-                                className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-                                title="Move to Trash">
-                                <Trash2 size={15} />
+                                className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors"
+                                title="Move to Trash"
+                              >
+                                <Trash2 size={16} />
                               </button>
                             </>
-                          )}
-                          {user?.role !== 'admin' && (
-                            <button
-                              onClick={() => setActionDoc(doc.id)}
-                              className="p-1.5 text-orange-600 hover:bg-orange-50 rounded transition-colors"
-                              title="Request Delete">
-                              <Trash2 size={15} />
-                            </button>
                           )}
                         </div>
                       </td>
                     </tr>
-              )
-              }
+                  ))
+                )}
               </tbody>
             </table>
-          </div> :
-
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {filtered.map((doc) =>
-          <div
-            key={doc.id}
-            className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 hover:shadow-md transition-shadow">
-
-                <div className="flex items-center justify-between mb-3">
-                  <span
-                className={`px-2 py-0.5 rounded text-xs font-bold uppercase ${fileTypeColors[doc.fileType] || 'bg-gray-100 text-gray-600'}`}>
-
-                    {doc.fileType}
-                  </span>
-                  <span
-                className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusBadge(doc.status)}`}>
-
-                    {doc.status}
-                  </span>
+          ) : (
+            /* Grid View */
+            <div className="p-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+              {filtered.length === 0 ? (
+                <div className="col-span-full py-16 text-center">
+                  <FileText size={48} className="mx-auto mb-4 text-gray-300 dark:text-gray-600" />
+                  <p className="text-gray-500 dark:text-gray-400">No documents found</p>
                 </div>
-                <h4 className="font-medium text-gray-800 text-sm mb-1 line-clamp-2">
-                  {doc.title}
-                </h4>
-                <p className="text-xs text-gray-500 mb-1">{doc.department}</p>
-                <p className="text-xs text-gray-400">
-                  {doc.date} · v{doc.version}
-                </p>
-                <div className="flex items-center gap-1 mt-3 pt-3 border-t border-gray-100">
-                  <button
-                onClick={() => handleView(doc)}
-                className="flex-1 py-1.5 text-xs text-[#005F02] hover:bg-green-50 rounded transition-colors">
-
-                    View
-                  </button>
-                  <button
-                onClick={() => handleDownload(doc)}
-                className="flex-1 py-1.5 text-xs text-blue-600 hover:bg-blue-50 rounded transition-colors">
-
-                    Download
-                  </button>
-                  {(user?.role === 'admin' ||
-              doc.uploadedById === user?.id) &&
-              <button
-                onClick={() => handleTrash(doc)}
-                className="flex-1 py-1.5 text-xs text-red-500 hover:bg-red-50 rounded transition-colors">
-
-                      Delete
+              ) : (
+                filtered.map((doc) => (
+                  <div
+                    key={doc.id}
+                    onClick={() => handleView(doc)}
+                    className="group flex flex-col items-center p-4 rounded-lg hover:bg-gray-100 dark:hover:bg-[#2a2a2a] cursor-pointer transition-colors relative"
+                  >
+                    {/* Favorite star in top right */}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleToggleFavorite(doc); }}
+                      className={`absolute top-2 right-2 p-1 rounded transition-all ${
+                        doc.isFavorite
+                          ? 'text-yellow-500 opacity-100'
+                          : 'text-gray-400 opacity-0 group-hover:opacity-100 hover:text-yellow-500'
+                      }`}
+                      title={doc.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+                    >
+                      <Star size={14} fill={doc.isFavorite ? 'currentColor' : 'none'} />
                     </button>
-              }
-                </div>
-              </div>
+                    <div className="relative mb-2">
+                      {getFileIcon(doc.fileType, 48)}
+                      {doc.isEncrypted && (
+                        <Lock size={12} className="absolute -top-1 -right-1 text-yellow-500" />
+                      )}
+                    </div>
+                    <p className="text-sm font-medium text-gray-800 dark:text-gray-200 text-center truncate max-w-full">
+                      {doc.title}
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 text-center truncate max-w-full">
+                      {doc.reference}
+                    </p>
+                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                      {formatDateAccessed(doc.date)}
+                    </p>
+                    <div className="mt-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleDownload(doc); }}
+                        className="p-1 text-gray-400 hover:text-blue-600 rounded"
+                      >
+                        <Download size={14} />
+                      </button>
+                      {user?.role === 'admin' && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleTrash(doc); }}
+                          className="p-1 text-gray-400 hover:text-red-600 rounded"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           )}
-          </div>
-        }
+        </div>
       </div>
 
-      {showUpload && <UploadModal onClose={() => setShowUpload(false)} defaultFolderId={selectedFolder || undefined} />}
+      {/* Modals */}
+      {showUpload && (
+        <UploadModal
+          onClose={() => setShowUpload(false)}
+          selectedFolderId={selectedFolderId}
+        />
+      )}
 
-      {/* Create Folder Modal */}
       {showCreateFolder && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
-            <div className="p-6 border-b border-gray-100 flex items-center justify-between">
-              <h3 className="font-semibold text-gray-800 text-lg">Create New Folder</h3>
+        <CreateFolderModal
+          onClose={() => {
+            setShowCreateFolder(false);
+            setNewFolderParentId(null);
+          }}
+          parentFolderId={newFolderParentId}
+        />
+      )}
+
+      {viewingDoc && (
+        <div className="fixed inset-0 bg-black/50 dark:bg-black/70 z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-[#2d2d2d] rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-[#404040]">
+              <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-200 truncate">
+                {viewingDoc.title}
+              </h3>
               <button
-                onClick={() => { setShowCreateFolder(false); setNewFolderName(''); }}
-                className="p-1 text-gray-400 hover:text-gray-600 transition-colors">
+                onClick={() => setViewingDoc(null)}
+                className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-[#3d3d3d] rounded-lg transition-colors"
+              >
                 <X size={20} />
               </button>
             </div>
-            <div className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Folder Name</label>
-                <input
-                  type="text"
-                  value={newFolderName}
-                  onChange={(e) => setNewFolderName(e.target.value)}
-                  placeholder="Enter folder name..."
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#427A43] text-gray-800"
-                  autoFocus
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Parent Folder (optional)</label>
-                <select
-                  value={newFolderParentId || ''}
-                  onChange={(e) => setNewFolderParentId(e.target.value || null)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#427A43] text-gray-800"
-                >
-                  <option value="">None (Root folder)</option>
-                  {visibleFolders.map((f) => (
-                    <option key={f.id} value={f.id}>{f.parentId ? `  └ ${f.name}` : f.name}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <div className="p-6 pt-0 flex gap-3">
-              <button
-                onClick={() => {
-                  if (!newFolderName.trim() || !user) return;
-                  addFolder({
-                    name: newFolderName.trim(),
-                    parentId: newFolderParentId,
-                    department: user.department,
-                    createdBy: user.name,
-                    createdById: user.id,
-                    createdByRole: user.role,
-                    visibility: 'private',
-                    permissions: ['admin', 'manager']
-                  });
-                  setNewFolderName('');
-                  setNewFolderParentId(null);
-                  setShowCreateFolder(false);
-                }}
-                disabled={!newFolderName.trim()}
-                className="flex-1 py-2.5 bg-[#005F02] text-white text-sm font-medium rounded-lg hover:bg-[#427A43] transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-                Create Folder
-              </button>
-              <button
-                onClick={() => { setShowCreateFolder(false); setNewFolderName(''); setNewFolderParentId(null); }}
-                className="flex-1 py-2.5 border border-gray-300 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">
-                Cancel
-              </button>
+            <div className="p-4 overflow-auto flex-1">
+              <FilePreview doc={viewingDoc} />
             </div>
           </div>
         </div>
       )}
 
-      {/* Document View Modal */}
-      {viewingDoc &&
-      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b border-gray-100 sticky top-0 bg-white">
-              <div className="flex items-start justify-between">
-                <div>
-                  <h3 className="font-semibold text-gray-800 text-lg">
-                    {viewingDoc.title}
-                  </h3>
-                  <p className="text-sm text-gray-500 mt-0.5">
-                    {viewingDoc.reference}
-                  </p>
-                </div>
-                <button
-                onClick={() => setViewingDoc(null)}
-                className="p-1 text-gray-400 hover:text-gray-600">
-
-                  ✕
-                </button>
-              </div>
-            </div>
-            <div className="p-6 space-y-3">
-              {viewingDoc && (
-                <div className="mb-3">
-                  <FilePreview doc={viewingDoc} />
-                </div>
-              )}
-              {[
-            ['Department', viewingDoc.department],
-            ['Uploaded By', viewingDoc.uploadedBy],
-            ['Date', viewingDoc.date],
-            ['File Type', viewingDoc.fileType.toUpperCase()],
-            ['File Size', viewingDoc.size],
-            ['Version', `v${viewingDoc.version}`],
-            ['Status', viewingDoc.status],
-            ['Needs Approval', viewingDoc.needsApproval ? 'Yes' : 'No'],
-            ['Approved By', viewingDoc.approvedBy || 'N/A'],
-            ['Encrypted', viewingDoc.isEncrypted ? 'Yes' : 'No'],
-            ['Description', viewingDoc.description || 'N/A']].
-            map(([label, value]) =>
-            <div
-              key={label}
-              className="flex justify-between text-sm border-b border-gray-50 pb-2">
-
-                  <span className="text-gray-500">{label}</span>
-                  <span className="text-gray-800 font-medium text-right max-w-48">
-                    {value}
-                  </span>
-                </div>
-            )}
-              {viewingDoc.tags && viewingDoc.tags.length > 0 &&
-            <div>
-                  <p className="text-sm text-gray-500 mb-2">Tags</p>
-                  <div className="flex flex-wrap gap-1">
-                    {viewingDoc.tags.map((tag) =>
-                <span
-                  key={tag}
-                  className="px-2 py-0.5 bg-[#F2E3BB] text-[#005F02] text-xs rounded-full">
-
-                        {tag}
-                      </span>
-                )}
-                  </div>
-                </div>
-            }
-              {viewingDoc.rejectionReason &&
-            <div className="p-3 bg-red-50 rounded-lg">
-                  <p className="text-xs font-medium text-red-700">
-                    Rejection Reason:
-                  </p>
-                  <p className="text-xs text-red-600 mt-1">
-                    {viewingDoc.rejectionReason}
-                  </p>
-                </div>
-            }
-            </div>
-            <div className="p-6 pt-0 flex gap-3">
-              <button
-              onClick={() => {
-                handleDownload(viewingDoc);
-                setViewingDoc(null);
-              }}
-              className="flex-1 py-2.5 bg-[#005F02] text-white text-sm font-medium rounded-lg hover:bg-[#427A43] transition-colors">
-
-                Download
-              </button>
-              <button
-              onClick={() => setViewingDoc(null)}
-              className="flex-1 py-2.5 border border-gray-300 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">
-
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      }
-
-      {/* Move to Trash Confirmation (Admins only) */}
-      {user?.role === 'admin' && trashTarget && (
-        <div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
-          onClick={() => setTrashTarget(null)}
-        >
-          <div
-            className="bg-white rounded-2xl shadow-2xl w-full max-w-sm"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="p-6">
-              <div className="flex items-start gap-4">
-                <div className="p-2 bg-red-50 rounded-xl flex-shrink-0">
-                  <Trash2 size={22} className="text-red-500" />
-                </div>
-                <div>
-                  <h3 className="font-semibold text-gray-800 text-base">Move to Trash</h3>
-                  <p className="text-sm text-gray-500 mt-1">
-                    Move <span className="font-medium text-gray-700">"{trashTarget.title}"</span> to trash?<br />
-                    You can restore it from the Trash page.
-                  </p>
-                </div>
-              </div>
-            </div>
-            <div className="px-6 pb-6 flex gap-3">
+      {trashTarget && (
+        <div className="fixed inset-0 bg-black/50 dark:bg-black/70 z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-[#2d2d2d] rounded-xl shadow-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-200 mb-2">
+              Move to Trash?
+            </h3>
+            <p className="text-gray-600 dark:text-gray-400 mb-6">
+              "{trashTarget.title}" will be moved to trash. You can restore it later.
+            </p>
+            <div className="flex justify-end gap-3">
               <button
                 onClick={() => setTrashTarget(null)}
-                className="flex-1 py-2.5 border border-gray-300 text-gray-600 text-sm font-medium rounded-xl hover:bg-gray-50 transition-colors"
+                className="px-4 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-[#3d3d3d] rounded-lg transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={() => confirmTrash(trashTarget)}
-                className="flex-1 py-2.5 bg-red-600 text-white text-sm font-semibold rounded-xl hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
               >
-                <Trash2 size={14} />
                 Move to Trash
               </button>
             </div>
@@ -971,14 +946,32 @@ export function DocumentsPage() {
         </div>
       )}
 
-      {/* Request Delete Modal for staff */}
-      {user?.role !== 'admin' && actionDoc && (
-        <RequestDeleteModal
-          document={filtered.find((d) => d.id === actionDoc)}
-          onClose={() => setActionDoc(null)}
-          onRequested={() => setActionDoc(null)}
-        />
-      )}
-    </div>);
-
+      {deleteFolderId && (() => {
+        const folderToDelete = visibleFolders.find(f => f.id === deleteFolderId);
+        const children = visibleFolders.filter(f => f.parentId === deleteFolderId);
+        return (
+          <DeleteFolderModal
+            folderName={folderToDelete?.name || ''}
+            hasChildren={children.length > 0}
+            childCount={children.length}
+            onCancel={() => setDeleteFolderId(null)}
+            onConfirm={() => {
+              deleteFolder(deleteFolderId);
+              addLog({
+                userId: user?.id || '',
+                userName: user?.name || '',
+                userRole: user?.role || '',
+                action: 'FOLDER_DELETED',
+                target: getFolderName(deleteFolderId),
+                targetType: 'folder',
+                timestamp: new Date().toISOString(),
+                ipAddress: '192.168.1.100'
+              });
+              setDeleteFolderId(null);
+            }}
+          />
+        );
+      })()}
+    </div>
+  );
 }

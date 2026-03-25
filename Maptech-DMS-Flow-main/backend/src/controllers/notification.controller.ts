@@ -86,6 +86,45 @@ export const markAllAsRead = async (req: AuthRequest, res: Response) => {
   }
 };
 
+// ── DELETE a single notification ────────────────────────────
+export const deleteNotification = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const userId = req.userId;
+
+    const result = await pool.query(
+      `DELETE FROM notifications WHERE id = $1 AND user_id = $2 RETURNING id`,
+      [id, userId]
+    );
+
+    if (result.rows.length === 0)
+      return res.status(404).json({ error: 'Notification not found' });
+
+    return res.json({ message: 'Notification deleted' });
+  } catch (err) {
+    console.error('deleteNotification error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+};
+
+// ── DELETE notifications by type ────────────────────────────
+export const deleteNotificationsByType = async (req: AuthRequest, res: Response) => {
+  try {
+    const { type } = req.params;
+    const userId = req.userId;
+
+    await pool.query(
+      `DELETE FROM notifications WHERE user_id = $1 AND type = $2`,
+      [userId, type]
+    );
+
+    return res.json({ message: 'Notifications deleted' });
+  } catch (err) {
+    console.error('deleteNotificationsByType error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+};
+
 // ── CREATE a notification (called internally or via API) ──
 export const createNotification = async (req: AuthRequest, res: Response) => {
   try {

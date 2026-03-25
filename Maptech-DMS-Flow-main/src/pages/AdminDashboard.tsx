@@ -203,17 +203,6 @@ export function AdminDashboard() {
               {viewingDocument && (
                 <div className="mb-3"><FilePreview doc={viewingDocument} /></div>
               )}
-              {[
-                ['Department', viewingDocument.department],
-                ['Uploaded By', viewingDocument.uploadedBy],
-                ['Date', viewingDocument.date],
-                ['File Type', viewingDocument.fileType.toUpperCase()],
-                ['Size', viewingDocument.size],
-                ['Version', `v${viewingDocument.version}`],
-                ['Description', viewingDocument.description || 'N/A']
-              ].map(([label, value]) => (
-                <div key={label as string} className="flex justify-between text-sm"><span className="text-gray-500">{label}</span><span className="text-gray-800 font-medium">{value}</span></div>
-              ))}
               {viewingDocument.tags && viewingDocument.tags.length > 0 && (
                 <div className="flex flex-wrap gap-1 pt-2">{viewingDocument.tags.map((tag) => <span key={tag} className="px-2 py-0.5 bg-[#F2E3BB] text-[#005F02] text-xs rounded-full">{tag}</span>)}</div>
               )}

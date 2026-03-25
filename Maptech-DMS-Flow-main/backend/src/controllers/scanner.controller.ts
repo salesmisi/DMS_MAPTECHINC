@@ -2,10 +2,12 @@ import type { Response } from 'express';
 import type { AuthRequest } from '../middleware/auth.middleware';
 import pool from '../db';
 import { v4 as uuidv4 } from 'uuid';
-import { exec } from 'child_process';
+import { exec, execSync } from 'child_process';
 import path from 'path';
 import fs from 'fs';
+import { PDFDocument } from 'pdf-lib';
 import scanWatcher from '../services/scanWatcher.service';
+import scanPerformance from '../services/scanPerformance.service';
 
 // NAPS2 executable path (can be configured via environment variable)
 const NAPS2_PATH = process.env.NAPS2_PATH || 'C:\\Program Files\\NAPS2\\NAPS2.Console.exe';
@@ -107,8 +109,9 @@ const detectWindowsScanners = (): Promise<Array<{ id: string; name: string; type
           }
         }
 
-        // Check for multifunction printers (MFPs) connected via USB
-        const printerCommand = `powershell -Command "Get-WmiObject -Class Win32_Printer | Select-Object Name, PortName, PrinterStatus, Local | ConvertTo-Json"`;
+        // Check for multifunction printers (MFPs) - only USB ones, skip network printers
+        // Network printers will be detected via NAPS2 ESCL
+        const printerCommand = `powershell -Command "Get-WmiObject -Class Win32_Printer | Select-Object Name, PortName, PrinterStatus, Local, WorkOffline, PrinterState | ConvertTo-Json"`;
 
         exec(printerCommand, { timeout: 15000 }, (printerError, printerStdout) => {
           if (!printerError && printerStdout.trim()) {
@@ -120,14 +123,28 @@ const detectWindowsScanners = (): Promise<Array<{ id: string; name: string; type
                   const exists = devices.some(d => d.name.toLowerCase() === printer.Name.toLowerCase());
                   // Check if it's a USB printer (Local=True and USB port)
                   const isUsb = printer.Local && (printer.PortName?.includes('USB') || printer.PortName?.startsWith('USB'));
-                  // Include all local printers as they might have scan capability
-                  if (!exists && printer.Local) {
+
+                  // Skip virtual printers (Microsoft XPS, PDF, OneNote, Fax)
+                  const isVirtualPrinter = /Microsoft (XPS|Print to PDF)|OneNote|Fax/i.test(printer.Name);
+
+                  // Skip network printers - they will be detected via ESCL
+                  const isNetworkPrinter = /\(network\)/i.test(printer.Name) || (!isUsb && !printer.PortName?.startsWith('USB'));
+
+                  // Determine actual printer status
+                  const isOffline = printer.WorkOffline === true ||
+                                    printer.PrinterStatus === 6 ||
+                                    printer.PrinterStatus === 5 ||
+                                    printer.PrinterStatus === 7;
+                  const isReady = !isOffline && (printer.PrinterStatus === 0 || printer.PrinterStatus === 2 || printer.PrinterStatus === 3 || printer.PrinterStatus === 4);
+
+                  // Only include USB printers (not virtual, not network)
+                  if (!exists && printer.Local && !isVirtualPrinter && isUsb && !isNetworkPrinter) {
                     devices.push({
                       id: `mfp-${index}`,
                       name: printer.Name,
                       type: 'multifunction',
-                      status: printer.PrinterStatus === 3 || printer.PrinterStatus === 0 ? 'ready' : 'offline',
-                      connection: isUsb ? 'USB' : 'Local'
+                      status: isReady ? 'ready' : 'offline',
+                      connection: 'USB'
                     });
                   }
                 }
@@ -144,74 +161,286 @@ const detectWindowsScanners = (): Promise<Array<{ id: string; name: string; type
   });
 };
 
-// Helper to detect scanners using NAPS2
+// Helper to check if a network device is reachable (optimized)
+const checkNetworkDevice = (ip: string): Promise<boolean> => {
+  return scanPerformance.checkNetworkDeviceOptimized(ip);
+};
+
+// Helper to detect scanners using NAPS2 (both WIA and ESCL drivers)
 const detectNaps2Scanners = (naps2Path: string): Promise<Array<{ id: string; name: string; type: string; status: string; connection: string }>> => {
-  return new Promise((resolve) => {
-    exec(`"${naps2Path}" --listdevices`, { timeout: 15000 }, (error, stdout) => {
-      if (error) {
-        resolve([]);
-        return;
+  return new Promise(async (resolve) => {
+    const devices: Array<{ id: string; name: string; type: string; status: string; connection: string }> = [];
+    const seenNames = new Set<string>();
+
+
+    // Always check network scanner status in real time (no cache)
+    const knownNetworkScanners = [
+      { id: 'escl-known-0', name: 'EPSON L5290 Series (192.168.1.40)', ip: '192.168.1.40', type: 'scanner', connection: 'Network' },
+      { id: 'escl-known-1', name: 'EPSON L6460 Series (192.168.1.109)', ip: '192.168.1.109', type: 'scanner', connection: 'Network' }
+    ];
+
+    for (const scanner of knownNetworkScanners) {
+      const isOnline = await checkNetworkDevice(scanner.ip);
+      devices.push({
+        id: scanner.id,
+        name: scanner.name,
+        type: scanner.type,
+        status: isOnline ? 'ready' : 'offline',
+        connection: scanner.connection
+      });
+      seenNames.add(scanner.name.toLowerCase());
+    }
+
+    // First detect WIA devices (local/USB scanners)
+    exec(`"${naps2Path}" --listdevices --driver wia`, { timeout: 20000 }, (wiaError, wiaStdout) => {
+      if (!wiaError && wiaStdout.trim()) {
+        const lines = wiaStdout.split('\n').filter(line => line.trim());
+        lines.forEach((name, index) => {
+          const trimmedName = name.trim();
+          if (trimmedName && !seenNames.has(trimmedName.toLowerCase())) {
+            seenNames.add(trimmedName.toLowerCase());
+            devices.push({
+              id: `wia-${index}`,
+              name: trimmedName,
+              type: 'scanner',
+              status: 'ready',
+              connection: 'USB'
+            });
+          }
+        });
       }
 
-      const lines = stdout.split('\n').filter(line => line.trim());
-      const scanners = lines.map((name, index) => ({
-        id: `naps2-${index}`,
-        name: name.trim(),
-        type: 'scanner',
-        status: 'ready',
-        connection: 'NAPS2'
-      }));
-
-      resolve(scanners);
+      // Return immediately with known devices + WIA devices
+      // ESCL detection is too slow and unreliable
+      resolve(devices);
     });
   });
 };
 
-// Get available scanners using multiple detection methods
-export const listScanners = async (_req: AuthRequest, res: Response) => {
+// Helper to find matching ESCL device for a network scanner name (synchronous)
+const findEsclDeviceSync = (naps2Path: string, scannerName: string): string | null => {
   try {
-    const allDevices: Array<{ id: string; name: string; type: string; status: string; connection: string }> = [];
-    const seenNames = new Set<string>();
+    console.log('Looking up ESCL device for:', scannerName);
+    const stdout = execSync(`"${naps2Path}" --listdevices --driver escl`, {
+      timeout: 45000,
+      encoding: 'utf8'
+    });
 
-    // Try NAPS2 first (most reliable for scanners)
-    const naps2Exists = fs.existsSync(NAPS2_PATH);
-    if (naps2Exists) {
-      const naps2Devices = await detectNaps2Scanners(NAPS2_PATH);
-      naps2Devices.forEach(device => {
-        const key = device.name.toLowerCase();
-        if (!seenNames.has(key)) {
-          seenNames.add(key);
-          allDevices.push(device);
-        }
-      });
+    if (!stdout.trim()) {
+      console.log('No ESCL devices found');
+      throw new Error('No ESCL devices found on the network. Please check scanner connection and power.');
     }
 
-    // Also try Windows WMI detection (especially for USB devices)
-    const wmiDevices = await detectWindowsScanners();
-    wmiDevices.forEach(device => {
-      const key = device.name.toLowerCase();
-      if (!seenNames.has(key)) {
-        seenNames.add(key);
-        allDevices.push(device);
-      }
-    });
+    console.log('ESCL devices found:', stdout.trim());
+    const lines = stdout.split('\n').filter(line => line.trim());
 
-    // Sort: USB scanners first, then other scanners, then multifunction printers
-    allDevices.sort((a, b) => {
-      // USB devices first
-      if (a.connection === 'USB' && b.connection !== 'USB') return -1;
-      if (a.connection !== 'USB' && b.connection === 'USB') return 1;
-      // Then scanners before multifunction
-      if (a.type === 'scanner' && b.type !== 'scanner') return -1;
-      if (a.type !== 'scanner' && b.type === 'scanner') return 1;
-      return a.name.localeCompare(b.name);
-    });
+    // Extract base name from "(Network)" format, e.g., "L5290 Series(Network)" -> "L5290"
+    const baseName = scannerName.replace(/\s*\(network\)/i, '').trim();
+    const searchTerms = baseName.toLowerCase().split(/\s+/);
+    console.log('Searching for terms:', searchTerms);
+
+    // Find ESCL device that matches the base name
+    for (const line of lines) {
+      const esclName = line.trim();
+      const esclLower = esclName.toLowerCase();
+      // Check if all search terms are present in the ESCL device name
+      const matches = searchTerms.every(term => esclLower.includes(term));
+      if (matches) {
+        console.log('Found matching ESCL device:', esclName);
+        return esclName;
+      }
+    }
+
+    console.log('No matching ESCL device found for:', scannerName);
+    return null;
+  } catch (error: any) {
+    console.error('ESCL device lookup error:', error.message);
+    return null;
+  }
+};
+
+async function resolveUserScanContext(userId: string, folderId?: string) {
+  const userRes = await pool.query('SELECT name, department FROM users WHERE id = $1', [userId]);
+  if (userRes.rows.length === 0) {
+    throw new Error('User not found');
+  }
+
+  const userName = userRes.rows[0].name;
+  let userDepartment = userRes.rows[0].department || 'General';
+
+  if (folderId) {
+    const findRootDepartment = async (currentFolderId: string): Promise<string | null> => {
+      const folderRes = await pool.query('SELECT id, name, parent_id, department, is_department FROM folders WHERE id = $1', [currentFolderId]);
+      if (folderRes.rows.length === 0) return null;
+
+      const folder = folderRes.rows[0];
+      if (folder.is_department || !folder.parent_id) {
+        return folder.department || folder.name;
+      }
+
+      return findRootDepartment(folder.parent_id);
+    };
+
+    const folderDepartment = await findRootDepartment(folderId);
+    if (folderDepartment) {
+      userDepartment = folderDepartment;
+    }
+  }
+
+  let departmentId: string | undefined;
+  const deptRes = await pool.query('SELECT id FROM departments WHERE LOWER(name) = LOWER($1)', [userDepartment]);
+  if (deptRes.rows.length > 0) {
+    departmentId = deptRes.rows[0].id;
+  }
+
+  return { userName, userDepartment, departmentId };
+}
+
+async function generateUniqueReference(department: string, departmentId?: string): Promise<string> {
+  const year = new Date().getFullYear();
+  const deptCode = (department || 'GEN').slice(0, 3).toUpperCase();
+
+  let reference = '';
+  let lastNumber = 1;
+  let retries = 0;
+  const maxRetries = 5;
+
+  while (retries < maxRetries) {
+    try {
+      if (departmentId) {
+        const upsertRes = await pool.query(`
+          INSERT INTO document_counters (id, department_id, year, last_number)
+          VALUES (uuid_generate_v4(), $1, $2, 1)
+          ON CONFLICT (department_id, year) DO UPDATE SET last_number = document_counters.last_number + 1
+          RETURNING last_number
+        `, [departmentId, year]);
+        lastNumber = upsertRes.rows[0].last_number;
+      } else {
+        const maxRes = await pool.query(`
+          SELECT COALESCE(MAX(CAST(SUBSTRING(reference FROM '[0-9]+$') AS INTEGER)), 0) + 1 as next_num
+          FROM documents
+          WHERE reference LIKE $1
+        `, [`${deptCode}_${year}_%`]);
+        lastNumber = maxRes.rows[0]?.next_num || 1;
+      }
+
+      if (retries > 0) {
+        const randomSuffix = Math.floor(Math.random() * 100);
+        reference = `${deptCode}_${year}_${String(lastNumber).padStart(3, '0')}_${randomSuffix}`;
+      } else {
+        reference = `${deptCode}_${year}_${String(lastNumber).padStart(3, '0')}`;
+      }
+
+      const existsCheck = await pool.query('SELECT 1 FROM documents WHERE reference = $1', [reference]);
+      if (existsCheck.rows.length === 0) {
+        return reference;
+      }
+
+      retries++;
+    } catch {
+      retries++;
+    }
+  }
+
+  return `${deptCode}_${year}_${Date.now()}`;
+}
+
+async function createScannedDocument(params: {
+  title: string;
+  folderId?: string;
+  userId: string;
+  userName: string;
+  department: string;
+  departmentId?: string;
+  filePath: string;
+  fileType: string;
+  scannedFrom?: string;
+  description?: string;
+}) {
+  const fileBuffer = fs.readFileSync(params.filePath);
+  const fileSize = fs.statSync(params.filePath).size;
+  const fileSizeStr = `${(fileSize / 1024 / 1024).toFixed(1)} MB`;
+  const relativeFilePath = path.relative(process.cwd(), params.filePath).replace(/\\/g, '/');
+  const reference = await generateUniqueReference(params.department, params.departmentId);
+  const docId = uuidv4();
+
+  const insertRes = await pool.query(`
+    INSERT INTO documents (
+      id, title, reference, date, uploaded_by, uploaded_by_id,
+      status, version, file_type, size, folder_id, needs_approval,
+      department, file_path, file_data, scanned_from, description, created_at
+    ) VALUES (
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW()
+    ) RETURNING *
+  `, [
+    docId,
+    params.title,
+    reference,
+    new Date().toISOString().split('T')[0],
+    params.userName,
+    params.userId,
+    'approved',
+    1,
+    params.fileType,
+    fileSizeStr,
+    params.folderId || null,
+    false,
+    params.department,
+    relativeFilePath,
+    fileBuffer,
+    params.scannedFrom || 'NAPS2 Scanner',
+    params.description || 'Scanned via NAPS2'
+  ]);
+
+  await pool.query(`
+    INSERT INTO activity_logs (
+      user_id, user_name, user_role, action, target, target_type, details, created_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+  `, [
+    params.userId,
+    params.userName,
+    'staff',
+    'DOCUMENT_SCANNED',
+    params.title,
+    'document',
+    `Scanned document "${params.title}". Reference: ${reference}`
+  ]);
+
+  return insertRes.rows[0];
+}
+
+function getStringParam(param: string | string[] | undefined): string {
+  if (Array.isArray(param)) {
+    return param[0] || '';
+  }
+  return param || '';
+}
+
+// Get available scanners using optimized detection methods
+export const listScanners = async (_req: AuthRequest, res: Response) => {
+  try {
+    const startTime = Date.now();
+
+    // Check if NAPS2 is installed
+    const naps2Exists = fs.existsSync(NAPS2_PATH);
+
+    // Use optimized scanner discovery
+    const allDevices = await scanPerformance.detectAllScannersOptimized(
+      naps2Exists ? NAPS2_PATH : undefined
+    );
+
+    const detectionTime = Date.now() - startTime;
+    console.log(`Scanner detection completed in ${detectionTime}ms (optimized)`);
 
     return res.json({
       scanners: allDevices,
       naps2Available: naps2Exists,
+      performance: {
+        detectionTimeMs: detectionTime,
+        cached: scanPerformance.getScannerCacheStatus().cached
+      },
       message: allDevices.length > 0
-        ? `Found ${allDevices.length} device(s)`
+        ? `Found ${allDevices.length} device(s) in ${detectionTime}ms`
         : 'No scanners or printers detected. Make sure your USB device is connected and powered on.'
     });
 
@@ -224,50 +453,90 @@ export const listScanners = async (_req: AuthRequest, res: Response) => {
 // Create a scan session and trigger NAPS2
 export const startScan = async (req: AuthRequest, res: Response) => {
   try {
-    const { title, format, folderId, scannerName } = req.body;
+    const {
+      title,
+      format,
+      folderId,
+      scannerName,
+      multiPage,
+      batchId: incomingBatchId,
+      pageNumber,
+      dpi = 300,
+      colorMode = 'color',
+      paperSize = 'letter',
+      scanSource = 'auto',
+    } = req.body;
+        // Validate: Legal size requires ADF
+        if (String(paperSize).toLowerCase() === 'legal' && scanSource !== 'feeder') {
+          return res.status(400).json({ error: 'Legal size scanning requires the document feeder (ADF). Please select ADF as the scan source.' });
+        }
     const userId = req.userId;
+    const isMultiPage = Boolean(multiPage);
+    const normalizedPageNumber = Number.isFinite(Number(pageNumber)) ? Math.max(1, Number(pageNumber)) : 1;
+    const effectiveFormat = isMultiPage ? 'pdf' : (format || 'pdf');
+
+    // Validate and normalize DPI (allowed: 150, 200, 300, 600)
+    const allowedDpi = [150, 200, 300, 600];
+    const effectiveDpi = allowedDpi.includes(Number(dpi)) ? Number(dpi) : 300;
+
+    // Map color mode to NAPS2 bitdepth values
+    const colorModeMap: Record<string, string> = {
+      'bw': 'bw',
+      'blackwhite': 'bw',
+      'black & white': 'bw',
+      'gray': 'gray',
+      'grayscale': 'gray',
+      'color': 'color'
+    };
+    const effectiveColorMode = colorModeMap[String(colorMode).toLowerCase()] || 'color';
+
+    // Map paper size to NAPS2 pagesize values
+    const paperSizeMap: Record<string, string> = {
+      'letter': 'letter',
+      'a4': 'a4',
+      'legal': 'legal'
+    };
+    const effectivePaperSize = paperSizeMap[String(paperSize).toLowerCase()] || 'letter';
 
     if (!title) {
       return res.status(400).json({ error: 'Document title is required' });
     }
 
-    // Get user info
-    const userRes = await pool.query('SELECT name, department FROM users WHERE id = $1', [userId]);
-    if (userRes.rows.length === 0) {
-      return res.status(401).json({ error: 'User not found' });
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
     }
-    const userName = userRes.rows[0].name;
-    let userDepartment = userRes.rows[0].department || 'General';
 
-    // If a folder is selected, get the root department folder's department
-    if (folderId) {
-      // Recursive function to find the root parent folder
-      const findRootDepartment = async (currentFolderId: string): Promise<string | null> => {
-        const folderRes = await pool.query('SELECT id, name, parent_id, department, is_department FROM folders WHERE id = $1', [currentFolderId]);
-        if (folderRes.rows.length === 0) return null;
+    if (isMultiPage && format && String(format).toLowerCase() !== 'pdf') {
+      return res.status(400).json({ error: 'Multi-page scanning currently supports PDF format only' });
+    }
 
-        const folder = folderRes.rows[0];
+    const { userName, userDepartment, departmentId } = await resolveUserScanContext(userId, folderId);
 
-        // If this is a root department folder, return its department
-        if (folder.is_department || !folder.parent_id) {
-          return folder.department || folder.name;
+    let batchId: string | undefined;
+    if (isMultiPage) {
+      batchId = typeof incomingBatchId === 'string' && incomingBatchId.trim() ? incomingBatchId.trim() : undefined;
+
+      if (batchId) {
+        const existingBatch = scanWatcher.getMultiPageBatch(batchId);
+        if (!existingBatch) {
+          return res.status(404).json({ error: 'Scan batch not found. Start a new multi-page scan.' });
         }
-
-        // Otherwise, go up to parent
-        return findRootDepartment(folder.parent_id);
-      };
-
-      const folderDepartment = await findRootDepartment(folderId);
-      if (folderDepartment) {
-        userDepartment = folderDepartment;
+        if (existingBatch.userId !== userId) {
+          return res.status(403).json({ error: 'You do not have access to this scan batch' });
+        }
+      } else {
+        batchId = uuidv4();
+        scanWatcher.createMultiPageBatch({
+          batchId,
+          title,
+          format: 'pdf',
+          folderId: folderId || '',
+          userId,
+          userName,
+          department: userDepartment,
+          departmentId
+        });
       }
-    }
-
-    // Get department ID if available
-    let departmentId: string | undefined;
-    const deptRes = await pool.query('SELECT id FROM departments WHERE LOWER(name) = LOWER($1)', [userDepartment]);
-    if (deptRes.rows.length > 0) {
-      departmentId = deptRes.rows[0].id;
     }
 
     // Create scan session in database
@@ -275,24 +544,26 @@ export const startScan = async (req: AuthRequest, res: Response) => {
     await pool.query(`
       INSERT INTO scan_sessions (id, title, format, folder_id, user_id, user_name, department, status, created_at)
       VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', NOW())
-    `, [sessionId, title, format || 'pdf', folderId || null, userId, userName, userDepartment]);
+    `, [sessionId, title, effectiveFormat, folderId || null, userId, userName, userDepartment]);
 
     // Add to pending scans for file watcher
     scanWatcher.addPendingScan({
       sessionId,
       title,
-      format: format || 'pdf',
+      format: effectiveFormat,
       folderId: folderId || '',
-      userId: userId || '',
+      userId,
       userName,
       department: userDepartment,
       departmentId,
+      batchId,
+      pageNumber: normalizedPageNumber,
       createdAt: new Date()
     });
 
     // Prepare NAPS2 command
     const scansDir = scanWatcher.SCANS_DIR;
-    const outputPath = path.join(scansDir, `scan_${sessionId}.${format || 'pdf'}`);
+    const outputPath = path.join(scansDir, `scan_${sessionId}.${effectiveFormat}`);
 
     // Check if NAPS2 exists
     const naps2Exists = fs.existsSync(NAPS2_PATH);
@@ -301,6 +572,9 @@ export const startScan = async (req: AuthRequest, res: Response) => {
       // NAPS2 not installed - return session info for manual scanning
       return res.json({
         sessionId,
+        batchId,
+        pageNumber: normalizedPageNumber,
+        multiPage: isMultiPage,
         message: 'Scan session created. NAPS2 not found - please scan manually and save to the scans folder.',
         scansDirectory: scansDir,
         status: 'waiting_for_file',
@@ -308,20 +582,100 @@ export const startScan = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    // Build NAPS2 command - use interactive mode (no --device) to let user select scanner in NAPS2 GUI
-    // If scannerName is provided and not empty, use it with WIA driver
+    // Build NAPS2 command based on scanner type
     let naps2Command: string;
+    let actualDeviceName = scannerName;
 
     if (scannerName && scannerName.trim()) {
-      // Use specified scanner with WIA driver (most compatible)
-      naps2Command = `"${NAPS2_PATH}" -o "${outputPath}" --driver wia --device "${scannerName}"`;
+      const deviceName = scannerName.trim();
+      // Detect if it's a network/ESCL scanner:
+      // - Contains IP address (e.g., "EPSON L5290 Series (192.168.1.40)")
+      // - Or has "(Network)" suffix from WMI detection
+      // - Or is a known network scanner model
+      const hasIpAddress = /\(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\)/.test(deviceName);
+      const isKnownNetworkScanner = /l5290|l6460/i.test(deviceName);
+      const isNetworkScanner = hasIpAddress || isKnownNetworkScanner;
+
+      if (isNetworkScanner) {
+        // Always use device name with IP address for known network scanners
+        let networkDeviceName = deviceName;
+        if (!hasIpAddress) {
+          if (/l5290/i.test(deviceName)) {
+            networkDeviceName = 'EPSON L5290 Series (192.168.1.40)';
+          } else if (/l6460/i.test(deviceName)) {
+            networkDeviceName = 'EPSON L6460 Series (192.168.1.109)';
+          } else {
+            // Fallback: try to find the device
+            const esclDevice = findEsclDeviceSync(NAPS2_PATH, deviceName);
+            if (esclDevice) {
+              networkDeviceName = esclDevice;
+            } else {
+              const errorMsg = `No ESCL device found matching "${deviceName}". Please select your network scanner manually in NAPS2.`;
+              console.error(errorMsg);
+              return res.status(404).json({ error: errorMsg });
+            }
+          }
+        }
+        // Log the device name and command
+        console.log('Using network scanner device name:', networkDeviceName);
+        // Network scanners: use ESCL driver with user-selected DPI, color mode, and paper size
+        let sourceArg = '';
+        if (scanSource === 'glass') sourceArg = '--source glass';
+        else if (scanSource === 'feeder') sourceArg = '--source feeder';
+        naps2Command = `"${NAPS2_PATH}" -o "${outputPath}" --driver escl --device "${networkDeviceName}" ${sourceArg} --dpi ${effectiveDpi} --bitdepth ${effectiveColorMode} --pagesize ${effectivePaperSize} --force --pdfcompat PDF_A_2B`;
+        console.log('NAPS2 ESCL Command:', naps2Command);
+        console.log(`Scan settings: DPI=${effectiveDpi}, ColorMode=${effectiveColorMode}, PaperSize=${effectivePaperSize}`);
+
+        // Run synchronously for network scanners to avoid timeout issues
+        try {
+          execSync(naps2Command, { timeout: 120000, encoding: 'utf8' });
+          console.log('Scan completed successfully');
+        } catch (scanError: any) {
+          let errorMsg = scanError.message || '';
+          // Detect timeout or feeder empty
+          if (/timed out|timeout/i.test(errorMsg)) {
+            errorMsg = 'Scan timed out. Please check that paper is loaded in the ADF (feeder) and the scanner is ready.';
+          } else if (/feeder.*empty|no paper|not loaded|document feeder/i.test(errorMsg)) {
+            errorMsg = 'ADF (feeder) is empty. Please load paper into the document feeder and try again.';
+          } else if (/no scanner|not found|device/i.test(errorMsg)) {
+            errorMsg = 'Scanner not found or unavailable. Please check the device connection.';
+          } else {
+            errorMsg = 'Scan failed: ' + errorMsg;
+          }
+          console.error('NAPS2 scan error:', errorMsg);
+          await pool.query(`
+            UPDATE scan_sessions SET status = 'failed', error_message = $1 WHERE id = $2
+          `, [errorMsg, sessionId]);
+          return res.status(500).json({ error: errorMsg });
+        }
+
+        return res.json({
+          sessionId,
+          batchId,
+          pageNumber: normalizedPageNumber,
+          multiPage: isMultiPage,
+          message: `Scanned with ${actualDeviceName}`,
+          scansDirectory: scansDir,
+          status: 'completed',
+          manualMode: false,
+          networkScanner: true,
+          scanSettings: { dpi: effectiveDpi, colorMode: effectiveColorMode, paperSize: effectivePaperSize }
+        });
+      } else {
+        // Local/USB scanners use WIA driver with user-selected settings
+        // Map scanSource for WIA (USB/local) as well
+        let wiaSourceArg = '';
+        if (scanSource === 'glass') wiaSourceArg = '--source glass';
+        else if (scanSource === 'feeder') wiaSourceArg = '--source feeder';
+        naps2Command = `"${NAPS2_PATH}" -o "${outputPath}" --driver wia --device "${deviceName}" ${wiaSourceArg} --dpi ${effectiveDpi} --bitdepth ${effectiveColorMode} --pagesize ${effectivePaperSize}`;
+      }
     } else {
       // No scanner specified - open NAPS2 GUI for interactive scanning
       naps2Command = `"${NAPS2_PATH}" -o "${outputPath}" --interactivescan`;
     }
 
     // Add format-specific options
-    if (format === 'pdf') {
+    if (effectiveFormat === 'pdf') {
       naps2Command += ' --pdfcompat PDF_A_2B';
     }
 
@@ -339,12 +693,20 @@ export const startScan = async (req: AuthRequest, res: Response) => {
       // File watcher will handle the rest when file appears
     });
 
+    // Detect if network scanner for response message
+    const hasIpInName = actualDeviceName && /\(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\)/.test(actualDeviceName);
+    const isNetworkDevice = hasIpInName || (scannerName && /\(network\)/i.test(scannerName));
+
     return res.json({
       sessionId,
-      message: scannerName ? `Scanning with ${scannerName}...` : 'NAPS2 opened. Please scan your document.',
+      batchId,
+      pageNumber: normalizedPageNumber,
+      multiPage: isMultiPage,
+      message: actualDeviceName ? `Scanning with ${actualDeviceName}...` : 'NAPS2 opened. Please scan your document.',
       scansDirectory: scansDir,
       status: 'scanning',
-      manualMode: false
+      manualMode: false,
+      networkScanner: isNetworkDevice
     });
 
   } catch (err: any) {
@@ -353,10 +715,151 @@ export const startScan = async (req: AuthRequest, res: Response) => {
   }
 };
 
+export const finalizeScanBatch = async (req: AuthRequest, res: Response) => {
+  try {
+    const batchId = getStringParam(req.params.batchId);
+    const userId = req.userId;
+
+    if (!batchId) {
+      return res.status(400).json({ error: 'Batch ID is required' });
+    }
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const batch = scanWatcher.getMultiPageBatch(batchId);
+    if (!batch) {
+      return res.status(404).json({ error: 'Scan batch not found' });
+    }
+
+    if (batch.userId !== userId) {
+      return res.status(403).json({ error: 'You do not have access to this scan batch' });
+    }
+
+    if (batch.pages.length === 0) {
+      return res.status(400).json({ error: 'No scanned pages found in this batch' });
+    }
+
+    const sortedPages = [...batch.pages].sort((a, b) => a.pageNumber - b.pageNumber || a.createdAt.getTime() - b.createdAt.getTime());
+    const mergedPdf = await PDFDocument.create();
+
+    for (const page of sortedPages) {
+      const pageBytes = fs.readFileSync(page.filePath);
+      const sourcePdf = await PDFDocument.load(pageBytes);
+      const copiedPages = await mergedPdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
+      copiedPages.forEach((p) => mergedPdf.addPage(p));
+    }
+
+    const mergedBytes = await mergedPdf.save();
+    const sanitizedTitle = batch.title.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const finalFileName = `${sanitizedTitle}_${Date.now()}.pdf`;
+    const finalFilePath = path.join(process.cwd(), 'uploads', finalFileName);
+    fs.writeFileSync(finalFilePath, mergedBytes);
+
+    const document = await createScannedDocument({
+      title: batch.title,
+      folderId: batch.folderId || undefined,
+      userId: batch.userId,
+      userName: batch.userName,
+      department: batch.department,
+      departmentId: batch.departmentId,
+      filePath: finalFilePath,
+      fileType: 'pdf',
+      scannedFrom: 'NAPS2 Scanner',
+      description: `Multi-page scan (${sortedPages.length} pages)`
+    });
+
+    const sessionIds = sortedPages.map((p) => p.sessionId);
+    if (sessionIds.length > 0) {
+      await pool.query(`
+        UPDATE scan_sessions
+        SET document_id = $1, status = 'completed', completed_at = COALESCE(completed_at, NOW())
+        WHERE id = ANY($2::uuid[])
+      `, [document.id, sessionIds]);
+    }
+
+    scanWatcher.clearMultiPageBatch(batchId);
+
+    if (typeof globalThis !== 'undefined') {
+      (globalThis as any).lastScannedDocument = {
+        id: document.id,
+        title: document.title,
+        reference: document.reference,
+        fileName: finalFileName,
+        fileType: 'pdf',
+        size: document.size,
+        sessionId: sessionIds[sessionIds.length - 1],
+        timestamp: new Date().toISOString()
+      };
+    }
+
+    return res.json({
+      message: `Multi-page scan finalized with ${sortedPages.length} page(s)`,
+      pages: sortedPages.length,
+      document: {
+        id: document.id,
+        title: document.title,
+        reference: document.reference,
+        fileType: document.file_type,
+        size: document.size,
+        status: document.status,
+        createdAt: document.created_at
+      }
+    });
+  } catch (err: any) {
+    console.error('finalizeScanBatch error:', err);
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+export const discardScanBatch = async (req: AuthRequest, res: Response) => {
+  try {
+    const batchId = getStringParam(req.params.batchId);
+    const userId = req.userId;
+
+    if (!batchId) {
+      return res.status(400).json({ error: 'Batch ID is required' });
+    }
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const batch = scanWatcher.getMultiPageBatch(batchId);
+    if (!batch) {
+      return res.status(404).json({ error: 'Scan batch not found' });
+    }
+
+    if (batch.userId !== userId) {
+      return res.status(403).json({ error: 'You do not have access to this scan batch' });
+    }
+
+    for (const page of batch.pages) {
+      scanWatcher.removePendingScan(page.sessionId);
+    }
+
+    const sessionIds = batch.pages.map((p) => p.sessionId);
+    if (sessionIds.length > 0) {
+      await pool.query(`
+        UPDATE scan_sessions
+        SET status = 'cancelled', completed_at = COALESCE(completed_at, NOW())
+        WHERE id = ANY($1::uuid[]) AND document_id IS NULL
+      `, [sessionIds]);
+    }
+
+    scanWatcher.clearMultiPageBatch(batchId);
+    return res.json({ message: 'Scan batch discarded' });
+  } catch (err: any) {
+    console.error('discardScanBatch error:', err);
+    return res.status(500).json({ error: err.message });
+  }
+};
+
 // Get scan session status
 export const getScanStatus = async (req: AuthRequest, res: Response) => {
   try {
-    const { sessionId } = req.params;
+    const sessionId = getStringParam(req.params.sessionId);
 
     const result = await pool.query(`
       SELECT s.*, d.id as document_id, d.reference, d.file_type
@@ -459,7 +962,7 @@ export const getLastScannedDocument = async (req: AuthRequest, res: Response) =>
 // Cancel a pending scan session
 export const cancelScan = async (req: AuthRequest, res: Response) => {
   try {
-    const { sessionId } = req.params;
+    const sessionId = getStringParam(req.params.sessionId);
     const userId = req.userId;
 
     // Verify ownership
@@ -488,13 +991,37 @@ export const cancelScan = async (req: AuthRequest, res: Response) => {
   }
 };
 
+// Get performance metrics
+export const getPerformanceMetrics = async (_req: AuthRequest, res: Response) => {
+  try {
+    const metrics = scanPerformance.getPerformanceMetrics();
+    return res.json(metrics);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+// Clear scanner cache for refresh
+export const clearScannerCache = async (_req: AuthRequest, res: Response) => {
+  try {
+    scanPerformance.clearScannerCache();
+    return res.json({ message: 'Scanner cache cleared successfully' });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+};
+
 export default {
   checkNaps2Installation,
   listScanners,
   startScan,
+  finalizeScanBatch,
+  discardScanBatch,
   getScanStatus,
   getRecentScans,
   getWatcherStatus,
   getLastScannedDocument,
-  cancelScan
+  cancelScan,
+  getPerformanceMetrics,
+  clearScannerCache
 };

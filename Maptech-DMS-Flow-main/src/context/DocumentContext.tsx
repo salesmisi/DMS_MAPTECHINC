@@ -30,6 +30,8 @@ export interface Document {
   tags?: string[];
   description?: string;
   scannedFrom?: string;
+  isFavorite?: boolean;
+  isShared?: boolean;
 }
 
 export interface Folder {
@@ -44,6 +46,8 @@ export interface Folder {
   permissions: string[];
   createdAt: string;
   isDepartment?: boolean;
+  status?: 'active' | 'trashed';
+  trashedAt?: string;
 }
 
 export interface ActivityLog {
@@ -78,6 +82,7 @@ interface DocumentContextType {
   addLog: (log: Omit<ActivityLog, 'id'>) => void;
   uploadNewVersion: (id: string, uploadedBy: string) => void;
   refreshDocuments: () => Promise<void>;
+  refreshLogs: () => Promise<void>;
 }
 
 const DocumentContext = createContext<DocumentContextType>(
@@ -515,7 +520,8 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         deleteFolder,
         addLog,
         uploadNewVersion,
-        refreshDocuments: fetchDocuments
+        refreshDocuments: fetchDocuments,
+        refreshLogs: fetchActivityLogs
       }}
     >
       {children}

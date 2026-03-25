@@ -14,7 +14,8 @@ import {
   Download,
   Loader2,
   Printer,
-  Usb
+  Usb,
+  HelpCircle
 } from 'lucide-react';
 import { useDocuments } from '../context/DocumentContext';
 import { formatDate } from '../utils/locale';
@@ -66,6 +67,13 @@ export function ScannerDashboard() {
   const [destFolder, setDestFolder] = useState('');
   const [docTitle, setDocTitle] = useState('');
 
+  // Scan quality settings
+  const [scanDpi, setScanDpi] = useState<number>(300);
+  const [colorMode, setColorMode] = useState<string>('color');
+  const [paperSize, setPaperSize] = useState<string>('letter');
+  // scanSource: 'auto', 'glass', 'feeder'
+  const [scanSource, setScanSource] = useState<string>('auto');
+
   const [recentScans, setRecentScans] = useState<ScanSession[]>([]);
   const [lastScannedDoc, setLastScannedDoc] = useState<LastScannedDoc | null>(null);
 
@@ -73,6 +81,10 @@ export function ScannerDashboard() {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [scanComplete, setScanComplete] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
+  const [multiPageMode, setMultiPageMode] = useState(false);
+  const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
+  const [scannedPages, setScannedPages] = useState(0);
+  const [finalizingBatch, setFinalizingBatch] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingScanners, setLoadingScanners] = useState(false);
   const [watcherStatus, setWatcherStatus] = useState<{
@@ -80,6 +92,7 @@ export function ScannerDashboard() {
     directory: string;
     pendingScans: number;
   } | null>(null);
+  const [showHelpTooltip, setShowHelpTooltip] = useState(false);
 
   const API_BASE = 'http://localhost:5000/api';
 
@@ -221,7 +234,7 @@ export function ScannerDashboard() {
   }, []);
 
   // Poll for scan completion
-  const pollScanStatus = useCallback(async (sessionId: string) => {
+  const pollScanStatus = useCallback(async (sessionId: string, options?: { multiPage?: boolean; batchId?: string }) => {
     const maxAttempts = 400; // 2 minutes with 300ms intervals
     let attempts = 0;
 
@@ -236,6 +249,16 @@ export function ScannerDashboard() {
           setScanning(false);
           setScanComplete(true);
           setCurrentSessionId(null);
+
+          if (options?.multiPage) {
+            if (options.batchId) {
+              setActiveBatchId(options.batchId);
+            }
+            setScannedPages((prev) => prev + 1);
+            setTimeout(() => setScanComplete(false), 3000);
+            await loadRecentScans();
+            return;
+          }
 
           // Refresh documents list
           await refreshDocuments?.();
@@ -302,6 +325,19 @@ export function ScannerDashboard() {
       return;
     }
 
+
+    // Auto-switch to ADF if Legal is selected and scanSource is not feeder
+    if (paperSize === 'legal' && scanSource !== 'feeder') {
+      setScanSource('feeder');
+      setScanError('Legal size scanning requires the document feeder (ADF). Scan source switched to ADF.');
+      return;
+    }
+    // Prevent scan if user tries to force Flatbed for Legal
+    if (paperSize === 'legal' && scanSource === 'glass') {
+      setScanError('Legal size scanning requires the document feeder (ADF). Please select ADF as the scan source.');
+      return;
+    }
+
     setScanError(null);
     setScanning(true);
     setScanComplete(false);
@@ -314,6 +350,8 @@ export function ScannerDashboard() {
       // Use subfolder if selected, otherwise use parent folder
       const targetFolderId = destFolder || parentFolder || null;
 
+      const isMultiPageScan = multiPageMode || !!activeBatchId;
+
       const res = await fetch(`${API_BASE}/scanner/scan`, {
         method: 'POST',
         headers: {
@@ -322,9 +360,16 @@ export function ScannerDashboard() {
         },
         body: JSON.stringify({
           title: docTitle,
-          format: fileFormat,
+          format: isMultiPageScan ? 'pdf' : fileFormat,
           folderId: targetFolderId,
-          scannerName: scannerName
+          scannerName: scannerName,
+          multiPage: isMultiPageScan,
+          batchId: activeBatchId,
+          pageNumber: scannedPages + 1,
+          dpi: scanDpi,
+          colorMode: colorMode,
+          paperSize: paperSize,
+          scanSource: scanSource
         })
       });
 
@@ -335,6 +380,9 @@ export function ScannerDashboard() {
       }
 
       setCurrentSessionId(data.sessionId);
+      if (data.batchId) {
+        setActiveBatchId(data.batchId);
+      }
 
       if (data.manualMode) {
         // NAPS2 not installed - show manual mode instructions
@@ -342,15 +390,96 @@ export function ScannerDashboard() {
       }
 
       // Start polling for completion
-      pollScanStatus(data.sessionId);
+      pollScanStatus(data.sessionId, {
+        multiPage: isMultiPageScan,
+        batchId: data.batchId || activeBatchId || undefined
+      });
 
-      // Clear title for next scan
-      setDocTitle('');
+      if (!isMultiPageScan) {
+        // Clear title for next scan in single-page mode
+        setDocTitle('');
+      }
 
     } catch (err: any) {
       console.error('Scan error:', err);
       setScanError(err.message || 'Failed to start scan');
       setScanning(false);
+    }
+  };
+
+  const handleFinalizeBatch = async () => {
+    if (!activeBatchId || scannedPages === 0) return;
+
+    setFinalizingBatch(true);
+    setScanError(null);
+
+    try {
+      const res = await fetch(`${API_BASE}/scanner/scan-batch/${activeBatchId}/finalize`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${getToken()}`
+        }
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to finalize multi-page scan');
+      }
+
+      await refreshDocuments?.();
+      await loadRecentScans();
+      await loadLastScanned();
+
+      const targetFolderId = destFolder || parentFolder || null;
+      const targetFolder = visibleFolders.find((f) => f.id === targetFolderId);
+      const folderName = targetFolder?.name || 'Root';
+      const selectedScannerObj = scanners.find((s) => s.id === selectedScanner);
+      const scannerName = selectedScannerObj?.name || 'Unknown Scanner';
+
+      addLog({
+        userId: user?.id || '',
+        userName: user?.name || '',
+        userRole: user?.role || '',
+        action: 'DOCUMENT_SCANNED',
+        target: docTitle,
+        targetType: 'document',
+        timestamp: new Date().toISOString(),
+        ipAddress: '',
+        details: `Multi-page scan (${scannedPages} pages) by ${user?.name || 'Unknown'} using ${scannerName}. Saved to folder: ${folderName}. Reference: ${data.document?.reference || 'N/A'}`
+      });
+
+      setScanComplete(true);
+      setActiveBatchId(null);
+      setScannedPages(0);
+      setCurrentSessionId(null);
+      setDocTitle('');
+      setTimeout(() => setScanComplete(false), 3000);
+    } catch (err: any) {
+      console.error('Finalize batch error:', err);
+      setScanError(err.message || 'Failed to finalize batch');
+    } finally {
+      setFinalizingBatch(false);
+    }
+  };
+
+  const handleDiscardBatch = async () => {
+    if (!activeBatchId) return;
+
+    try {
+      await fetch(`${API_BASE}/scanner/scan-batch/${activeBatchId}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${getToken()}`
+        }
+      });
+    } catch (err) {
+      console.error('Discard batch error:', err);
+    } finally {
+      setActiveBatchId(null);
+      setScannedPages(0);
+      setCurrentSessionId(null);
+      setScanning(false);
+      setScanComplete(false);
     }
   };
 
@@ -549,11 +678,13 @@ export function ScannerDashboard() {
                             USB
                           </span>
                         )}
-                        <span className="text-xs text-gray-500 capitalize">{scanner.status}</span>
+                        <span className={`text-xs ${scanner.status === 'ready' ? 'text-green-600' : 'text-amber-600'}`}>
+                          {scanner.status === 'ready' ? 'Ready' : 'Not Ready'}
+                        </span>
                       </div>
                     </div>
                     <div className={`w-2 h-2 rounded-full ${
-                      scanner.status === 'ready' ? 'bg-green-500' : 'bg-gray-300'
+                      scanner.status === 'ready' ? 'bg-green-500' : 'bg-amber-400'
                     }`} />
                   </label>
                 ))}
@@ -574,9 +705,77 @@ export function ScannerDashboard() {
 
             <div className="space-y-4">
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1.5">
-                  Document Title *
-                </label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-medium text-gray-600">
+                    Document Title *
+                  </label>
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setShowHelpTooltip(!showHelpTooltip)}
+                      onMouseEnter={() => setShowHelpTooltip(true)}
+                      onMouseLeave={() => setShowHelpTooltip(false)}
+                      className="text-gray-400 hover:text-[#427A43] transition-colors"
+                    >
+                      <HelpCircle size={14} />
+                    </button>
+                    {showHelpTooltip && (
+                      <div className="absolute right-0 top-6 z-50 w-64 bg-white rounded-xl shadow-lg border border-gray-100 p-4 animate-in fade-in duration-200">
+                        <div className="flex items-center gap-2 mb-3">
+                          <div className="w-6 h-6 rounded-full bg-[#427A43]/10 flex items-center justify-center">
+                            <HelpCircle size={14} className="text-[#427A43]" />
+                          </div>
+                          <h4 className="text-sm font-semibold text-gray-800">Document Type Codes</h4>
+                        </div>
+                        <div className="space-y-2">
+                          <div className="flex items-start gap-2">
+                            <span className="text-xs font-bold text-[#005F02] bg-green-50 px-2 py-0.5 rounded">SI</span>
+                            <span className="text-xs text-gray-600">Service or Sales Invoice</span>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <span className="text-xs font-bold text-[#005F02] bg-green-50 px-2 py-0.5 rounded">LIQ</span>
+                            <span className="text-xs text-gray-600">Liquidation</span>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <span className="text-xs font-bold text-[#005F02] bg-green-50 px-2 py-0.5 rounded">REIM</span>
+                            <span className="text-xs text-gray-600">Reimbursement</span>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <span className="text-xs font-bold text-[#005F02] bg-green-50 px-2 py-0.5 rounded">PRF</span>
+                            <span className="text-xs text-gray-600">Purchase Requisition Form</span>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <span className="text-xs font-bold text-[#005F02] bg-green-50 px-2 py-0.5 rounded">RECP</span>
+                            <span className="text-xs text-gray-600">Receipt</span>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <span className="text-xs font-bold text-[#005F02] bg-green-50 px-2 py-0.5 rounded">OR</span>
+                            <span className="text-xs text-gray-600">Official Receipt</span>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <span className="text-xs font-bold text-[#005F02] bg-green-50 px-2 py-0.5 rounded">CV</span>
+                            <span className="text-xs text-gray-600">Check Voucher</span>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <span className="text-xs font-bold text-[#005F02] bg-green-50 px-2 py-0.5 rounded">PO</span>
+                            <span className="text-xs text-gray-600">Purchase Order</span>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <span className="text-xs font-bold text-[#005F02] bg-green-50 px-2 py-0.5 rounded">CR</span>
+                            <span className="text-xs text-gray-600">Collection Receipt / Cash Receipt</span>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <span className="text-xs font-bold text-[#005F02] bg-green-50 px-2 py-0.5 rounded">DR</span>
+                            <span className="text-xs text-gray-600">Delivery Receipt</span>
+                          </div>
+                        </div>
+                        <div className="mt-3 pt-2 border-t border-gray-100">
+                          <p className="text-[10px] text-red-500">If no Reference No. is specified, replace it with one of the following types</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
                 <input
                   type="text"
                   value={docTitle}
@@ -584,10 +783,30 @@ export function ScannerDashboard() {
                     setDocTitle(e.target.value);
                     setScanError(null);
                   }}
-                  placeholder="Enter document title..."
-                  disabled={scanning}
+                  placeholder="COMPANY_₱ 00.00_DATE (MAR19,2026)_REF NO.(SI_LIQ_REIM_PRF)"
+                  disabled={scanning || (activeBatchId !== null && scannedPages > 0)}
                   className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#427A43] disabled:bg-gray-50"
                 />
+              </div>
+
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={multiPageMode || activeBatchId !== null}
+                    onChange={(e) => setMultiPageMode(e.target.checked)}
+                    disabled={scanning || activeBatchId !== null}
+                    className="mt-0.5"
+                  />
+                  <span className="text-xs text-blue-800">
+                    Combine multiple scans into one PDF. After each page, you can continue scanning and finalize once all pages are captured.
+                  </span>
+                </label>
+                {activeBatchId && (
+                  <p className="text-xs text-blue-700 mt-2">
+                    Multi-page session active: {scannedPages} page{scannedPages === 1 ? '' : 's'} captured.
+                  </p>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -598,7 +817,7 @@ export function ScannerDashboard() {
                   <select
                     value={fileFormat}
                     onChange={(e) => setFileFormat(e.target.value)}
-                    disabled={scanning}
+                    disabled={scanning || multiPageMode || activeBatchId !== null}
                     className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm disabled:bg-gray-50"
                   >
                     <option value="pdf">PDF</option>
@@ -627,6 +846,73 @@ export function ScannerDashboard() {
                         {f.name}
                       </option>
                     ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Scan Quality Settings */}
+              <div className="grid grid-cols-4 gap-4">
+                                <div>
+                                  <label className="block text-xs font-medium text-gray-600 mb-1.5">
+                                    Scan Source
+                                  </label>
+                                  <select
+                                    value={scanSource}
+                                    onChange={(e) => setScanSource(e.target.value)}
+                                    disabled={scanning}
+                                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm disabled:bg-gray-50"
+                                  >
+                                    <option value="auto">Auto Detect</option>
+                                    <option value="glass">Flatbed (Glass)</option>
+                                    <option value="feeder">ADF (Document Feeder)</option>
+                                  </select>
+                                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1.5">
+                    Resolution (DPI)
+                  </label>
+                  <select
+                    value={scanDpi}
+                    onChange={(e) => setScanDpi(Number(e.target.value))}
+                    disabled={scanning}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm disabled:bg-gray-50"
+                  >
+                    <option value={150}>150 DPI (Fast)</option>
+                    <option value={200}>200 DPI (Draft)</option>
+                    <option value={300}>300 DPI (Standard)</option>
+                    <option value={600}>600 DPI (High)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1.5">
+                    Color Mode
+                  </label>
+                  <select
+                    value={colorMode}
+                    onChange={(e) => setColorMode(e.target.value)}
+                    disabled={scanning}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm disabled:bg-gray-50"
+                  >
+                    <option value="color">Color</option>
+                    <option value="gray">Grayscale</option>
+                    <option value="bw">Black & White</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1.5">
+                    Paper Size
+                  </label>
+                  <select
+                    value={paperSize}
+                    onChange={(e) => setPaperSize(e.target.value)}
+                    disabled={scanning}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm disabled:bg-gray-50"
+                  >
+                    <option value="letter">Letter (8.5 x 11")</option>
+                    <option value="a4">A4 (8.27 x 11.69")</option>
+                    <option value="legal">Legal (8.5 x 14")</option>
                   </select>
                 </div>
               </div>
@@ -671,7 +957,9 @@ export function ScannerDashboard() {
                 <div className="p-3 bg-green-50 rounded-lg border border-green-200 flex items-center gap-2">
                   <CheckCircle size={16} className="text-green-600" />
                   <span className="text-xs font-medium text-green-700">
-                    Scan complete! Document added to library.
+                    {activeBatchId
+                      ? `Page ${scannedPages} captured. Continue scanning or finalize to save one PDF.`
+                      : 'Scan complete! Document added to library.'}
                   </span>
                 </div>
               )}
@@ -681,7 +969,9 @@ export function ScannerDashboard() {
                 <div className="p-3 bg-blue-50 rounded-lg border border-blue-200 flex items-center gap-2">
                   <Loader2 size={16} className="text-blue-600 animate-spin" />
                   <span className="text-xs text-blue-700">
-                    Scanning in progress... Waiting for scanned file.
+                    {activeBatchId
+                      ? `Scanning page ${scannedPages + 1}... Waiting for scanned file.`
+                      : 'Scanning in progress... Waiting for scanned file.'}
                   </span>
                 </div>
               )}
@@ -689,7 +979,7 @@ export function ScannerDashboard() {
               <div className="flex gap-3">
                 <button
                   onClick={handleScan}
-                  disabled={scanning || !docTitle.trim()}
+                  disabled={scanning || finalizingBatch || !docTitle.trim()}
                   className="flex-1 py-3 bg-[#005F02] text-white font-semibold text-sm rounded-xl hover:bg-[#427A43] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
                   {scanning ? (
@@ -700,7 +990,7 @@ export function ScannerDashboard() {
                   ) : (
                     <>
                       <Zap size={18} />
-                      Start Scan
+                      {activeBatchId ? 'Scan Next Page' : 'Start Scan'}
                     </>
                   )}
                 </button>
@@ -714,6 +1004,25 @@ export function ScannerDashboard() {
                   </button>
                 )}
               </div>
+
+              {activeBatchId && scannedPages > 0 && !scanning && (
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={handleFinalizeBatch}
+                    disabled={finalizingBatch}
+                    className="py-2.5 bg-[#427A43] text-white font-medium text-sm rounded-lg hover:bg-[#005F02] transition-colors disabled:opacity-60"
+                  >
+                    {finalizingBatch ? 'Finalizing...' : 'Finalize and Save PDF'}
+                  </button>
+                  <button
+                    onClick={handleDiscardBatch}
+                    disabled={finalizingBatch}
+                    className="py-2.5 border border-red-300 text-red-600 font-medium text-sm rounded-lg hover:bg-red-50 transition-colors disabled:opacity-60"
+                  >
+                    Discard Batch
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -791,13 +1100,17 @@ export function ScannerDashboard() {
                             <span className={`text-xs px-2 py-0.5 rounded-full ${
                               scan.status === 'completed'
                                 ? 'bg-green-100 text-green-700'
-                                : scan.status === 'pending' || scan.status === 'scanning'
+                                : scan.status === 'scanning'
                                 ? 'bg-blue-100 text-blue-700'
-                                : scan.status === 'failed'
+                                : scan.status === 'failed' || scan.status === 'pending'
                                 ? 'bg-red-100 text-red-700'
                                 : 'bg-gray-100 text-gray-600'
                             }`}>
-                              {scan.status}
+                              {scan.status === 'completed' ? 'Completed'
+                                : scan.status === 'scanning' ? 'Scanning...'
+                                : scan.status === 'pending' ? 'Failed - Try Again'
+                                : scan.status === 'failed' ? 'Failed'
+                                : scan.status}
                             </span>
                             {scan.reference && (
                               <span className="text-xs text-gray-500 font-mono">
