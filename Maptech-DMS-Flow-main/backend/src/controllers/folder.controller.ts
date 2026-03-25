@@ -8,7 +8,8 @@ import jwt from 'jsonwebtoken';
 export const listFolders = async (_req: Request, res: Response) => {
   try {
     // Return folders ordered alphabetically by name (case-insensitive), then by creation time
-    const result = await pool.query("SELECT * FROM folders ORDER BY LOWER(name) ASC, created_at ASC");
+    // Exclude trashed folders from the list
+    const result = await pool.query("SELECT * FROM folders WHERE (status IS NULL OR status != 'trashed') ORDER BY LOWER(name) ASC, created_at ASC");
     const rows = result.rows;
 
     // If an Authorization token is provided, attempt to verify and return a per-user filtered view
@@ -147,7 +148,7 @@ export const updateFolder = async (req: AuthRequest, res: Response) => {
   }
 };
 
-// Delete a folder (and its subfolders)
+// Delete a folder (soft delete - moves to trash)
 export const deleteFolder = async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   try {
@@ -164,12 +165,41 @@ export const deleteFolder = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ error: 'Only admins can delete folders directly. Please request deletion for admin approval.' });
     }
 
-    // Delete subfolders first
-    await pool.query('DELETE FROM folders WHERE parent_id = $1', [id]);
-    // Delete the folder itself
-    const result = await pool.query('DELETE FROM folders WHERE id = $1 RETURNING *', [id]);
+    // SOFT DELETE: Mark as trashed instead of hard delete
+    const result = await pool.query(
+      `UPDATE folders SET status = 'trashed', trashed_at = NOW() WHERE id = $1 RETURNING *`,
+      [id]
+    );
+
     if (result.rows.length === 0) return res.status(404).json({ error: 'Folder not found' });
     const deleted = result.rows[0];
+
+    // Also trash all documents in this folder (cascade soft delete)
+    await pool.query(
+      `UPDATE documents SET status = 'trashed', trashed_at = NOW() WHERE folder_id = $1`,
+      [id]
+    );
+
+    // Recursively trash subfolders
+    const subfolders = await pool.query('SELECT id FROM folders WHERE parent_id = $1', [id]);
+    for (const subfolder of subfolders.rows) {
+      await pool.query(
+        `UPDATE folders SET status = 'trashed', trashed_at = NOW() WHERE id = $1`,
+        [subfolder.id]
+      );
+      // Trash documents in subfolders too
+      await pool.query(
+        `UPDATE documents SET status = 'trashed', trashed_at = NOW() WHERE folder_id = $1`,
+        [subfolder.id]
+      );
+    }
+
+    // Log to trash_history
+    await pool.query(
+      `INSERT INTO trash_history (target_type, target_id, target_name, action, performed_by, performed_by_name, scheduled_deletion_at)
+       VALUES ('folder', $1, $2, 'trashed', $3, $4, NOW() + INTERVAL '30 days')`,
+      [deleted.id, deleted.name, req.userId, req.userName || 'Unknown']
+    );
 
     // Write an activity log entry for admin
     try {
@@ -180,20 +210,140 @@ export const deleteFolder = async (req: AuthRequest, res: Response) => {
         userName = u.rows[0]?.name || null;
       }
       const ip = (req.headers['x-forwarded-for'] as string) || req.ip || null;
-      const details = `Folder "${deleted.name}" was deleted by admin`;
+      const details = `Folder "${deleted.name}" was moved to trash`;
       await pool.query(
         `INSERT INTO activity_logs (user_id, user_name, user_role, action, target, target_type, ip_address, details, created_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW())`,
-        [userId, userName, 'admin', 'FOLDER_DELETED', deleted.name, 'folder', ip, details]
+        [userId, userName, 'admin', 'FOLDER_TRASHED', deleted.name, 'folder', ip, details]
       );
     } catch (logErr) {
       console.error('Failed to write activity log for folder delete:', logErr);
     }
 
-    res.json({ message: 'Folder deleted', folder: deleted });
+    res.json({ message: 'Folder moved to trash', folder: deleted });
   } catch (err) {
     res.status(500).json({ error: 'Failed to delete folder' });
   }
 };
 
-export default { listFolders, createFolder, updateFolder, deleteFolder };
+// Restore a folder from trash
+export const restoreFolder = async (req: AuthRequest, res: Response) => {
+  const { id } = req.params;
+  try {
+    // Get folder details first
+    const folderCheck = await pool.query('SELECT * FROM folders WHERE id = $1', [id]);
+    if (folderCheck.rows.length === 0) return res.status(404).json({ error: 'Folder not found' });
+
+    const folder = folderCheck.rows[0];
+
+    // If folder has a parent, ensure parent exists and is active
+    if (folder.parent_id) {
+      const parentCheck = await pool.query('SELECT * FROM folders WHERE id = $1', [folder.parent_id]);
+      if (parentCheck.rows.length === 0) {
+        return res.status(400).json({ error: 'Parent folder no longer exists. Cannot restore.' });
+      }
+
+      const parent = parentCheck.rows[0];
+      // If parent is trashed, restore it first (recursive restoration)
+      if (parent.status === 'trashed') {
+        await pool.query(
+          `UPDATE folders SET status = 'active', trashed_at = NULL WHERE id = $1`,
+          [parent.id]
+        );
+      }
+    }
+
+    // If folder belongs to a department, ensure department folder exists
+    if (folder.department && !folder.is_department) {
+      const deptFolderCheck = await pool.query(
+        'SELECT * FROM folders WHERE department = $1 AND is_department = TRUE',
+        [folder.department]
+      );
+
+      // If department folder is trashed, restore it first
+      if (deptFolderCheck.rows.length > 0 && deptFolderCheck.rows[0].status === 'trashed') {
+        await pool.query(
+          `UPDATE folders SET status = 'active', trashed_at = NULL WHERE id = $1`,
+          [deptFolderCheck.rows[0].id]
+        );
+      }
+    }
+
+    // Now restore the folder
+    const result = await pool.query(
+      `UPDATE folders SET status = 'active', trashed_at = NULL WHERE id = $1 RETURNING *`,
+      [id]
+    );
+
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Folder not found' });
+    const restored = result.rows[0];
+
+    // Restore all documents in this folder - they keep their original department
+    await pool.query(
+      `UPDATE documents SET status = 'approved', trashed_at = NULL WHERE folder_id = $1 AND status = 'trashed'`,
+      [id]
+    );
+
+    // Restore subfolders - they keep their original department
+    await pool.query(
+      `UPDATE folders SET status = 'active', trashed_at = NULL WHERE parent_id = $1 AND status = 'trashed'`,
+      [id]
+    );
+
+    // Log to trash_history
+    await pool.query(
+      `INSERT INTO trash_history (target_type, target_id, target_name, action, performed_by, performed_by_name, metadata)
+       VALUES ('folder', $1, $2, 'restored', $3, $4, $5)`,
+      [restored.id, restored.name, req.userId, req.userName || 'Unknown',
+       JSON.stringify({ department: restored.department })]
+    );
+
+    res.json({ message: `Folder restored to ${restored.department || 'its'} department`, folder: restored });
+  } catch (err) {
+    console.error('restoreFolder error:', err);
+    res.status(500).json({ error: 'Failed to restore folder' });
+  }
+};
+
+// Permanently delete a folder (admin only, from trash)
+export const permanentlyDeleteFolder = async (req: AuthRequest, res: Response) => {
+  const { id } = req.params;
+  try {
+    if (req.userRole !== 'admin') {
+      return res.status(403).json({ error: 'Only admins can permanently delete folders' });
+    }
+
+    const existing = await pool.query('SELECT * FROM folders WHERE id = $1 AND status = $2', [id, 'trashed']);
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Folder not found in trash' });
+    }
+
+    const folder = existing.rows[0];
+
+    // Permanently delete documents in folder
+    await pool.query('DELETE FROM documents WHERE folder_id = $1', [id]);
+
+    // Permanently delete subfolders and their documents
+    const subfolders = await pool.query('SELECT id FROM folders WHERE parent_id = $1', [id]);
+    for (const sub of subfolders.rows) {
+      await pool.query('DELETE FROM documents WHERE folder_id = $1', [sub.id]);
+      await pool.query('DELETE FROM folders WHERE id = $1', [sub.id]);
+    }
+
+    // Delete the folder itself
+    await pool.query('DELETE FROM folders WHERE id = $1', [id]);
+
+    // Log to trash_history
+    await pool.query(
+      `INSERT INTO trash_history (target_type, target_id, target_name, action, performed_by, performed_by_name, actual_deletion_at)
+       VALUES ('folder', $1, $2, 'permanently_deleted', $3, $4, NOW())`,
+      [folder.id, folder.name, req.userId, req.userName || 'Unknown']
+    );
+
+    res.json({ message: 'Folder permanently deleted' });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to permanently delete folder' });
+  }
+};
+
+export default { listFolders, createFolder, updateFolder, deleteFolder, restoreFolder, permanentlyDeleteFolder };

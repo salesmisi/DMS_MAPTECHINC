@@ -30,6 +30,8 @@ export interface Document {
   tags?: string[];
   description?: string;
   scannedFrom?: string;
+  isFavorite?: boolean;
+  isShared?: boolean;
 }
 
 export interface Folder {
@@ -44,6 +46,8 @@ export interface Folder {
   permissions: string[];
   createdAt: string;
   isDepartment?: boolean;
+  status?: 'active' | 'trashed';
+  trashedAt?: string;
 }
 
 export interface ActivityLog {

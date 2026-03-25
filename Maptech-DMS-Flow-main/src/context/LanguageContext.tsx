@@ -373,6 +373,8 @@ const resources: Record<LangCode, any> = {
     newPassword: 'New Password',
     confirmNewPassword: 'Confirm New Password',
     passwordChangedMsg: 'Password changed — you will be logged out',
+    logoSettings: 'Logo Settings',
+    logoSettingsDesc: 'Change the logo',
 
     // ── Upload Modal ──
     documentUploaded: 'Document Uploaded!',
@@ -883,6 +885,8 @@ const resources: Record<LangCode, any> = {
     newPassword: 'Bagong Password',
     confirmNewPassword: 'Kumpirmahin ang Bagong Password',
     passwordChangedMsg: 'Nabago ang password — magla-logout ang system',
+    logoSettings: 'Mga Setting ng Logo',
+    logoSettingsDesc: 'Baguhin ang logo',
 
     // ── Upload Modal ──
     documentUploaded: 'Na-upload na ang Dokumento!',

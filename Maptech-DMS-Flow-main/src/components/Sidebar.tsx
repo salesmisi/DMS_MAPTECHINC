@@ -21,6 +21,7 @@ import { useAuth } from '../context/AuthContext';
 import { useNavigation, PageName } from '../App';
 import { useDocuments } from '../context/DocumentContext';
 import { useLanguage } from '../context/LanguageContext';
+import { useLogo, LOGO_SIZES } from '../context/LogoContext';
 interface SidebarProps {
   isOpen: boolean;
   onToggle: () => void;
@@ -41,6 +42,7 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
   const { currentPage, navigate } = useNavigation();
   const { documents } = useDocuments();
   const { t } = useLanguage();
+  const { logo, logoSize } = useLogo();
   const [expandedItems, setExpandedItems] = useState<string[]>(['documents']);
   const pendingCount = documents.filter((d) => d.status === 'pending').length;
   const navItems: NavItem[] = [
@@ -167,9 +169,9 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
             title="Go to Dashboard"
           >
             <img
-              src="/maptechlogo.png"
-              alt="Maptech Logo"
-              className="w-13 h-auto object-contain"/>
+              src={logo}
+              alt="Logo"
+              className={`${LOGO_SIZES[logoSize].width} h-auto object-contain`}/>
           </button>
         ) : (
           <button
@@ -178,8 +180,8 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
             title="Go to Dashboard"
           >
             <img
-              src="/maptechlogo.png"
-              alt="Maptech Logo"
+              src={logo}
+              alt="Logo"
               className="w-7 h-7 object-contain"/>
           </button>
         )}

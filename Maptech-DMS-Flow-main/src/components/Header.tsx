@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Menu, Bell, Search, ChevronDown, User, Settings, LogOut, FileText, CheckCheck } from 'lucide-react';
+import { Menu, Bell, ChevronDown, User, Settings, LogOut, FileText, CheckCheck } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigation, PageName } from '../App';
 import { useDocuments } from '../context/DocumentContext';
@@ -7,8 +7,6 @@ import { useNotifications } from '../context/NotificationContext';
 import { hasApprovalAccess } from '../utils/roles';
 import { useTheme } from '../context/ThemeContext';
 import { useLanguage } from '../context/LanguageContext';
-import { formatDateOnly } from '../utils/locale';
-import { AutocompleteSearch } from './AutocompleteSearch';
 interface HeaderProps {
   onMenuToggle: () => void;
   currentPage: PageName;
@@ -23,12 +21,7 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
   const { t } = useLanguage();
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
   const isApprover = hasApprovalAccess(user);
-  const docSuggestions = React.useMemo(() =>
-    documents.filter((d) => d.status !== 'trashed' && d.status !== 'archived').map((d) => d.title).filter(Boolean),
-    [documents]
-  );
 
   // Use backend unread count for the badge
   const pendingCount = unreadCount;
@@ -87,21 +80,6 @@ export function Header({ onMenuToggle, currentPage }: HeaderProps) {
         <p className="text-xs text-gray-500 dark:text-gray-400">
           {t('maptechSubtitle')}
         </p>
-      </div>
-
-      {/* Search */}
-      <div className="hidden md:block w-64">
-        <AutocompleteSearch
-          value={searchQuery}
-          onChange={(val) => {
-            setSearchQuery(val);
-            if (val.trim()) navigate('documents');
-          }}
-          suggestions={docSuggestions}
-          placeholder={t('searchDocuments')}
-          className="bg-gray-100 dark:bg-[#2a2a2a] rounded-lg px-3 py-2"
-          inputClassName="dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500"
-        />
       </div>
 
       {/* Dark Mode Toggle */}

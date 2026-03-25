@@ -3,11 +3,13 @@ import { Eye, EyeOff, Lock, Mail } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { useNavigation } from '../App';
+import { useLogo, LOGO_SIZES } from '../context/LogoContext';
 
 export function LoginPage() {
   const { login } = useAuth();
   const { t } = useLanguage();
   const { navigate } = useNavigation();
+  const { logo, logoSize } = useLogo();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -64,9 +66,9 @@ export function LoginPage() {
               title="Go to Dashboard"
             >
               <img
-                src="/maptechlogo.png"
+                src={logo}
                 alt="Maptech Logo"
-                className="w-66 object-contain mx-auto mb-4"
+                className={`${LOGO_SIZES[logoSize].width} object-contain mx-auto mb-4`}
               />
             </button>
             <p className="text-white text-lg font-semibold">

@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigation } from '../App';
-import { Trash2, CheckCircle, XCircle, Eye, Clock, FileText, Folder, AlertTriangle } from 'lucide-react';
+import { Trash2, CheckCircle, XCircle, Eye, Clock, FileText, Folder, AlertTriangle, X } from 'lucide-react';
+import FilePreview from '../components/FilePreview';
 
 const API_URL = 'http://localhost:5000/api';
 
@@ -25,6 +26,7 @@ export default function AdminDeleteRequests() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [counts, setCounts] = useState({ pending: 0, approved: 0, denied: 0, all: 0 });
+  const [previewDoc, setPreviewDoc] = useState<any>(null);
 
   const fetchRequests = async (status?: string) => {
     setLoading(true);
@@ -278,23 +280,13 @@ export default function AdminDeleteRequests() {
                             </button>
                             <button
                               onClick={() => {
-                                try {
-                                  if (req.type === 'document') {
-                                    const docId = req.resolvedTarget?.id || req.target_id;
-                                    if (docId) {
-                                      sessionStorage.setItem('dms_preview_doc_id', String(docId));
-                                      const folderId = req.resolvedTarget?.folder_id || req.resolvedTarget?.folderId || null;
-                                      if (folderId && selectFolder) selectFolder(folderId);
-                                      navigate('documents');
-                                      return;
-                                    }
-                                    navigate('documents');
-                                  } else {
-                                    const fid = req.resolvedTarget?.id || req.target_id;
-                                    if (fid && selectFolder) selectFolder(fid);
-                                    navigate('documents');
-                                  }
-                                } catch (e) {
+                                if (req.type === 'document' && req.resolvedTarget) {
+                                  // Show preview modal for documents
+                                  setPreviewDoc(req.resolvedTarget);
+                                } else if (req.type === 'folder') {
+                                  // For folders, navigate to the folder
+                                  const fid = req.resolvedTarget?.id || req.target_id;
+                                  if (fid && selectFolder) selectFolder(fid);
                                   navigate('documents');
                                 }
                               }}
@@ -314,6 +306,42 @@ export default function AdminDeleteRequests() {
           )}
         </div>
       </div>
+
+      {/* Preview Modal */}
+      {previewDoc && (
+        <div className="fixed inset-0 bg-black/50 dark:bg-black/70 z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-[#2d2d2d] rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-[#404040]">
+              <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-200 truncate">
+                {previewDoc.title || previewDoc.name || 'Document Preview'}
+              </h3>
+              <button
+                onClick={() => setPreviewDoc(null)}
+                className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-[#3d3d3d] rounded-lg transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-4 overflow-auto flex-1">
+              <FilePreview doc={{
+                id: previewDoc.id,
+                title: previewDoc.title || previewDoc.name,
+                fileType: previewDoc.file_type || previewDoc.fileType || 'pdf',
+                reference: previewDoc.reference,
+                department: previewDoc.department,
+                date: previewDoc.date || previewDoc.created_at,
+                uploadedBy: previewDoc.uploaded_by || previewDoc.uploadedBy,
+                uploadedById: previewDoc.uploaded_by_id || previewDoc.uploadedById,
+                status: previewDoc.status,
+                version: previewDoc.version || 1,
+                size: previewDoc.size || '0',
+                folderId: previewDoc.folder_id || previewDoc.folderId,
+                needsApproval: previewDoc.needs_approval || previewDoc.needsApproval || false
+              }} />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

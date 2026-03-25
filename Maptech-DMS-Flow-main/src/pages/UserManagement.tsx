@@ -69,6 +69,13 @@ export function UserManagement() {
   const [showAddUser, setShowAddUser] = useState(false);
   const [showAddDept, setShowAddDept] = useState(false);
   const [editingUser, setEditingUser] = useState<string | null>(null);
+  const [editUserData, setEditUserData] = useState({
+    name: '',
+    email: '',
+    role: 'staff' as 'admin' | 'manager' | 'staff',
+    department: '',
+    status: 'active' as 'active' | 'inactive'
+  });
   const [departments, setDepartments] = useState<Department[]>([]);
   const [loadingDepts, setLoadingDepts] = useState(true);
   const [activeTab, setActiveTab] = useState<'users' | 'departments'>('users');
@@ -258,6 +265,36 @@ export function UserManagement() {
       details: `Status changed from ${currentStatus} to ${newStatus}`
     });
   };
+
+  const handleEditUser = (u: typeof users[0]) => {
+    setEditingUser(u.id);
+    setEditUserData({
+      name: u.name,
+      email: u.email,
+      role: u.role,
+      department: u.department,
+      status: u.status
+    });
+  };
+
+  const handleSaveEditUser = async () => {
+    if (!editingUser) return;
+    await updateUser(editingUser, editUserData);
+    const targetUser = users.find((u) => u.id === editingUser);
+    addLog({
+      userId: currentUser?.id || '',
+      userName: currentUser?.name || '',
+      userRole: currentUser?.role || 'admin',
+      action: 'USER_UPDATED',
+      target: targetUser?.name || editingUser,
+      targetType: 'user',
+      timestamp: new Date().toISOString(),
+      ipAddress: '192.168.1.100',
+      details: `User details updated: ${editUserData.name}, ${editUserData.role}, ${editUserData.department}`
+    });
+    setEditingUser(null);
+  };
+
   const handleDeleteUser = async (id: string, name: string) => {
     setDeleteConfirm({ id, name });
   };
@@ -405,6 +442,13 @@ export function UserManagement() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1 justify-end">
+                        <button
+                          onClick={() => handleEditUser(u)}
+                          className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                          title="Edit User"
+                        >
+                          <Edit2 size={15} />
+                        </button>
                         <button
                       onClick={() => handleToggleStatus(u.id, u.status)}
                       className={`p-1.5 rounded transition-colors ${u.status === 'active' ? 'text-gray-400 hover:text-red-600 hover:bg-red-50' : 'text-gray-400 hover:text-green-600 hover:bg-green-50'}`}
@@ -640,6 +684,131 @@ export function UserManagement() {
           </div>
         </div>
       }
+
+      {/* Edit User Modal */}
+      {editingUser && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="p-6 border-b border-gray-100">
+              <h3 className="font-semibold text-gray-800 text-lg">
+                Edit User
+              </h3>
+              <p className="text-sm text-gray-500 mt-0.5">
+                Update user details
+              </p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  {t('fullNameRequired')}
+                </label>
+                <input
+                  type="text"
+                  value={editUserData.name}
+                  onChange={(e) =>
+                    setEditUserData((prev) => ({
+                      ...prev,
+                      name: e.target.value
+                    }))
+                  }
+                  className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#427A43]"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  {t('emailRequired')}
+                </label>
+                <input
+                  type="email"
+                  value={editUserData.email}
+                  onChange={(e) =>
+                    setEditUserData((prev) => ({
+                      ...prev,
+                      email: e.target.value
+                    }))
+                  }
+                  className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#427A43]"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                    {t('role')}
+                  </label>
+                  <select
+                    value={editUserData.role}
+                    onChange={(e) =>
+                      setEditUserData((prev) => ({
+                        ...prev,
+                        role: e.target.value as any
+                      }))
+                    }
+                    className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#427A43]"
+                  >
+                    <option value="staff">{t('staff')}</option>
+                    <option value="manager">{t('manager')}</option>
+                    <option value="admin">{t('admin')}</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                    {t('department')}
+                  </label>
+                  <select
+                    value={editUserData.department}
+                    onChange={(e) =>
+                      setEditUserData((prev) => ({
+                        ...prev,
+                        department: e.target.value
+                      }))
+                    }
+                    className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#427A43]"
+                  >
+                    <option value="">{t('selectDepartment')}</option>
+                    {departments.map((dept) => (
+                      <option key={dept.id} value={dept.name}>
+                        {dept.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  {t('status')}
+                </label>
+                <select
+                  value={editUserData.status}
+                  onChange={(e) =>
+                    setEditUserData((prev) => ({
+                      ...prev,
+                      status: e.target.value as any
+                    }))
+                  }
+                  className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#427A43]"
+                >
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+              </div>
+            </div>
+            <div className="p-6 pt-0 flex gap-3">
+              <button
+                onClick={handleSaveEditUser}
+                className="flex-1 py-2.5 bg-[#005F02] text-white text-sm font-semibold rounded-lg hover:bg-[#427A43] transition-colors"
+              >
+                Save Changes
+              </button>
+              <button
+                onClick={() => setEditingUser(null)}
+                className="flex-1 py-2.5 border border-gray-300 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                {t('cancel')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add Department Modal */}
       {showAddDept &&

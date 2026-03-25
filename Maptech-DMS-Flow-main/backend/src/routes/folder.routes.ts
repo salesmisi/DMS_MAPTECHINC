@@ -11,7 +11,11 @@ router.get('/', folderController.listFolders);
 router.post('/', verifyToken, folderController.createFolder);
 // Update a folder
 router.put('/:id', verifyToken, folderController.updateFolder);
-// Delete a folder (admin only)
+// Delete a folder (admin only - soft delete)
 router.delete('/:id', verifyToken, requireRole(['admin']), folderController.deleteFolder);
+// Restore a folder from trash
+router.patch('/:id/restore', verifyToken, requireRole(['admin']), folderController.restoreFolder);
+// Permanently delete a folder (admin only)
+router.delete('/:id/permanent', verifyToken, requireRole(['admin']), folderController.permanentlyDeleteFolder);
 
 export default router;

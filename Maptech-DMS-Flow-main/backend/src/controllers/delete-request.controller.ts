@@ -118,31 +118,51 @@ export const approveDeleteRequest = async (req: AuthRequest, res: Response) => {
     await pool.query(
       `INSERT INTO notifications (user_id, type, title, message)
        VALUES ($1, 'delete-approved', $2, $3)`,
-      [request.requested_by, `Delete Approved: ${request.type}`, `Your request to delete the ${request.type} has been approved and processed.`]
+      [request.requested_by, `Delete Approved: ${request.type}`, `Your request to delete the ${request.type} has been approved and moved to trash.`]
     );
 
-    // Perform the actual deletion based on type
-    let deleteResult;
+    // SOFT DELETE: Move to trash instead of hard delete
+    let softDeleteResult;
     if (request.type === 'folder') {
-      // Delete folder and subfolders
       const folderRes = await pool.query('SELECT * FROM folders WHERE id = $1', [request.target_id]);
       if (folderRes.rows.length === 0) return res.status(404).json({ error: 'Folder not found' });
-      // Delete subfolders first
-      await pool.query('DELETE FROM folders WHERE parent_id = $1', [request.target_id]);
-      // Delete the folder itself
-      deleteResult = await pool.query('DELETE FROM folders WHERE id = $1 RETURNING *', [request.target_id]);
-      // Optionally: log activity here
+
+      // Soft delete folder
+      softDeleteResult = await pool.query(
+        `UPDATE folders SET status = 'trashed', trashed_at = NOW() WHERE id = $1 RETURNING *`,
+        [request.target_id]
+      );
+
+      // Cascade: Trash documents in folder
+      await pool.query(
+        `UPDATE documents SET status = 'trashed', trashed_at = NOW() WHERE folder_id = $1`,
+        [request.target_id]
+      );
+
+      // Cascade: Trash subfolders
+      await pool.query(
+        `UPDATE folders SET status = 'trashed', trashed_at = NOW() WHERE parent_id = $1`,
+        [request.target_id]
+      );
+
     } else if (request.type === 'document') {
-      // Delete document
       const docRes = await pool.query('SELECT * FROM documents WHERE id = $1', [request.target_id]);
       if (docRes.rows.length === 0) return res.status(404).json({ error: 'Document not found' });
-      deleteResult = await pool.query('DELETE FROM documents WHERE id = $1 RETURNING *', [request.target_id]);
-      // Optionally: log activity here
+
+      // Soft delete document
+      softDeleteResult = await pool.query(
+        `UPDATE documents SET status = 'trashed', trashed_at = NOW(), trashed_by = $2 WHERE id = $1 RETURNING *`,
+        [request.target_id, adminId]
+      );
     } else {
       return res.status(400).json({ error: 'Invalid delete request type' });
     }
 
-    return res.json({ request: result.rows[0], deleted: deleteResult.rows[0] });
+    return res.json({
+      request: result.rows[0],
+      trashed: softDeleteResult.rows[0],
+      message: `${request.type} moved to trash. It will be permanently deleted after 30 days.`
+    });
   } catch (err) {
     console.error('approveDeleteRequest error:', err);
     return res.status(500).json({ error: 'Server error' });

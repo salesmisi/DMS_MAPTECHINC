@@ -2,15 +2,16 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
-import { Bell, Globe, Shield, Smartphone, Monitor } from 'lucide-react';
+import { Bell, Globe, Shield, Smartphone, Monitor, Image } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useLanguage } from '../context/LanguageContext';
+import { LogoSettings } from '../components/LogoSettings';
 
 const API_URL = 'http://localhost:5000/api';
 
 export function SettingsPage() {
-  const { changePassword, logout, token } = useAuth();
+  const { changePassword, logout, token, user } = useAuth();
   const [notifications, setNotifications] = useState({
     email: true,
     browser: true,
@@ -244,6 +245,22 @@ export function SettingsPage() {
           </button>
         </div>
       </Card>
+
+      {/* Logo Settings Section - Admin Only */}
+      {user?.role === 'admin' && (
+        <Card className="p-6">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="p-2 bg-indigo-50 rounded-lg">
+              <Image className="text-indigo-600" size={24} />
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900">{t('logoSettings') || 'Logo Settings'}</h3>
+              <p className="text-sm text-gray-500">{t('logoSettingsDesc') || 'Change the logo'}</p>
+            </div>
+          </div>
+          <LogoSettings />
+        </Card>
+      )}
 
       {/* Regional Section */}
       <Card className="p-6">
