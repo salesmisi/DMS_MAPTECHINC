@@ -172,30 +172,24 @@ const detectNaps2Scanners = (naps2Path: string): Promise<Array<{ id: string; nam
     const devices: Array<{ id: string; name: string; type: string; status: string; connection: string }> = [];
     const seenNames = new Set<string>();
 
-    // Check known network scanners and verify they're online
+
+    // Always check network scanner status in real time (no cache)
     const knownNetworkScanners = [
       { id: 'escl-known-0', name: 'EPSON L5290 Series (192.168.1.40)', ip: '192.168.1.40', type: 'scanner', connection: 'Network' },
       { id: 'escl-known-1', name: 'EPSON L6460 Series (192.168.1.109)', ip: '192.168.1.109', type: 'scanner', connection: 'Network' }
     ];
 
-    // Check each network scanner in parallel
-    const networkChecks = await Promise.all(
-      knownNetworkScanners.map(async (scanner) => {
-        const isOnline = await checkNetworkDevice(scanner.ip);
-        return {
-          id: scanner.id,
-          name: scanner.name,
-          type: scanner.type,
-          status: isOnline ? 'ready' : 'offline',
-          connection: scanner.connection
-        };
-      })
-    );
-
-    networkChecks.forEach(scanner => {
+    for (const scanner of knownNetworkScanners) {
+      const isOnline = await checkNetworkDevice(scanner.ip);
+      devices.push({
+        id: scanner.id,
+        name: scanner.name,
+        type: scanner.type,
+        status: isOnline ? 'ready' : 'offline',
+        connection: scanner.connection
+      });
       seenNames.add(scanner.name.toLowerCase());
-      devices.push(scanner);
-    });
+    }
 
     // First detect WIA devices (local/USB scanners)
     exec(`"${naps2Path}" --listdevices --driver wia`, { timeout: 20000 }, (wiaError, wiaStdout) => {
@@ -234,7 +228,7 @@ const findEsclDeviceSync = (naps2Path: string, scannerName: string): string | nu
 
     if (!stdout.trim()) {
       console.log('No ESCL devices found');
-      return null;
+      throw new Error('No ESCL devices found on the network. Please check scanner connection and power.');
     }
 
     console.log('ESCL devices found:', stdout.trim());
@@ -599,60 +593,36 @@ export const startScan = async (req: AuthRequest, res: Response) => {
       // - Or has "(Network)" suffix from WMI detection
       // - Or is a known network scanner model
       const hasIpAddress = /\(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\)/.test(deviceName);
-      const hasNetworkSuffix = /\(network\)/i.test(deviceName);
       const isKnownNetworkScanner = /l5290|l6460/i.test(deviceName);
-      const isNetworkScanner = hasIpAddress || hasNetworkSuffix || isKnownNetworkScanner;
+      const isNetworkScanner = hasIpAddress || isKnownNetworkScanner;
 
       if (isNetworkScanner) {
-        // Network scanners use ESCL driver
-        if (hasIpAddress) {
-          // Already in proper ESCL format with IP
-          actualDeviceName = deviceName;
-        } else {
-          // Map to known ESCL device names with IP addresses
+        // Always use device name with IP address for known network scanners
+        let networkDeviceName = deviceName;
+        if (!hasIpAddress) {
           if (/l5290/i.test(deviceName)) {
-            actualDeviceName = 'EPSON L5290 Series (192.168.1.40)';
+            networkDeviceName = 'EPSON L5290 Series (192.168.1.40)';
           } else if (/l6460/i.test(deviceName)) {
-            actualDeviceName = 'EPSON L6460 Series (192.168.1.109)';
+            networkDeviceName = 'EPSON L6460 Series (192.168.1.109)';
           } else {
             // Fallback: try to find the device
             const esclDevice = findEsclDeviceSync(NAPS2_PATH, deviceName);
             if (esclDevice) {
-              actualDeviceName = esclDevice;
+              networkDeviceName = esclDevice;
             } else {
-              // Last resort: interactive mode
-              console.log(`No ESCL device found matching "${deviceName}", using interactive mode`);
-              naps2Command = `"${NAPS2_PATH}" -o "${outputPath}" --interactivescan --pdfcompat PDF_A_2B`;
-              console.log('NAPS2 Command:', naps2Command);
-              exec(naps2Command, { timeout: 300000 }, async (error, _stdout, stderr) => {
-                if (error) {
-                  console.error('NAPS2 scan error:', stderr || error.message);
-                  await pool.query(`
-                    UPDATE scan_sessions SET status = 'failed', error_message = $1 WHERE id = $2
-                  `, [stderr || error.message, sessionId]);
-                }
-              });
-              return res.json({
-                sessionId,
-                batchId,
-                pageNumber: normalizedPageNumber,
-                multiPage: isMultiPage,
-                message: 'NAPS2 opened. Please select your network scanner manually.',
-                scansDirectory: scansDir,
-                status: 'scanning',
-                manualMode: false,
-                networkScanner: true
-              });
+              const errorMsg = `No ESCL device found matching "${deviceName}". Please select your network scanner manually in NAPS2.`;
+              console.error(errorMsg);
+              return res.status(404).json({ error: errorMsg });
             }
           }
         }
+        // Log the device name and command
+        console.log('Using network scanner device name:', networkDeviceName);
         // Network scanners: use ESCL driver with user-selected DPI, color mode, and paper size
-        // Map scanSource to NAPS2 CLI
         let sourceArg = '';
         if (scanSource === 'glass') sourceArg = '--source glass';
         else if (scanSource === 'feeder') sourceArg = '--source feeder';
-        // 'auto' omits --source for auto-detect
-        naps2Command = `"${NAPS2_PATH}" -o "${outputPath}" --driver escl --device "${actualDeviceName}" ${sourceArg} --dpi ${effectiveDpi} --bitdepth ${effectiveColorMode} --pagesize ${effectivePaperSize} --force --pdfcompat PDF_A_2B`;
+        naps2Command = `"${NAPS2_PATH}" -o "${outputPath}" --driver escl --device "${networkDeviceName}" ${sourceArg} --dpi ${effectiveDpi} --bitdepth ${effectiveColorMode} --pagesize ${effectivePaperSize} --force --pdfcompat PDF_A_2B`;
         console.log('NAPS2 ESCL Command:', naps2Command);
         console.log(`Scan settings: DPI=${effectiveDpi}, ColorMode=${effectiveColorMode}, PaperSize=${effectivePaperSize}`);
 

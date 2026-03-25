@@ -147,6 +147,41 @@ async function processScannedFile(filePath: string): Promise<void> {
 
   console.log(`New scan detected: ${fileName}`);
 
+  // Timeout logic: if file is not processed within 60 seconds, mark as failed
+  const MAX_WAIT_MS = 60000; // 60 seconds
+  const startTime = Date.now();
+  let processed = false;
+
+  // Wait for file to be accessible (in case it's still being written)
+  while (!processed && Date.now() - startTime < MAX_WAIT_MS) {
+    try {
+      // Try to open the file for reading
+      fs.accessSync(filePath, fs.constants.R_OK);
+      processed = true;
+    } catch (err) {
+      // File not ready yet, wait a bit
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  }
+
+  if (!processed) {
+    console.error(`Timeout: Scanned file ${fileName} not accessible after ${MAX_WAIT_MS / 1000} seconds.`);
+    // Mark the oldest pending scan as failed
+    const pendingScan = getOldestPendingScan();
+    if (pendingScan) {
+      await pool.query(`
+        UPDATE scan_sessions
+        SET status = 'failed', error_message = $1
+        WHERE id = $2
+      `, [
+        `Scan failed: File ${fileName} not detected or accessible after ${MAX_WAIT_MS / 1000} seconds. Please check scanner and network.`,
+        pendingScan.sessionId
+      ]);
+      removePendingScan(pendingScan.sessionId);
+    }
+    return;
+  }
+
   // Get the oldest pending scan session
   const pendingScan = getOldestPendingScan();
 
@@ -275,21 +310,50 @@ async function createDocumentOptimized(params: {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-
-    // Single optimized insert statement
-    const insertRes = await client.query(`
-      INSERT INTO documents (
-        id, title, reference, date, uploaded_by, uploaded_by_id,
-        status, version, file_type, size, folder_id, needs_approval,
-        department, file_path, file_data, scanned_from, description, created_at
-      ) VALUES (
-        $1, $2, $3, CURRENT_DATE, $4, $5, 'approved', 1, $6, $7, $8, false,
-        $9, $10, $11, 'NAPS2 Scanner', 'Scanned via NAPS2', NOW()
-      ) RETURNING *
-    `, [
-      docId, title, reference, userName, userId, ext,
-      fileSizeStr, folderId, `uploads/${newFileName}`, department, fileBuffer
-    ]);
+    let insertRes;
+    try {
+      // Try to insert document
+      insertRes = await client.query(`
+        INSERT INTO documents (
+          id, title, reference, date, uploaded_by, uploaded_by_id,
+          status, version, file_type, size, folder_id, needs_approval,
+          department, file_path, file_data, scanned_from, description, created_at
+        ) VALUES (
+          $1, $2, $3, CURRENT_DATE, $4, $5, 'approved', 1, $6, $7, $8, false,
+          $9, $10, $11, 'NAPS2 Scanner', 'Scanned via NAPS2', NOW()
+        ) RETURNING *
+      `, [
+        docId, title, reference, userName, userId, ext,
+        fileSizeStr, folderId, `uploads/${newFileName}`, department, fileBuffer
+      ]);
+    } catch (error: any) {
+      // Duplicate reference error: 23505 is unique_violation in Postgres
+      if (error.code === '23505' && error.constraint && error.constraint.includes('documents_reference_key')) {
+        try {
+          // Generate a new unique reference and retry ONCE
+          const newReference = reference + '_' + Math.floor(Math.random() * 10000);
+          insertRes = await client.query(`
+            INSERT INTO documents (
+              id, title, reference, date, uploaded_by, uploaded_by_id,
+              status, version, file_type, size, folder_id, needs_approval,
+              department, file_path, file_data, scanned_from, description, created_at
+            ) VALUES (
+              $1, $2, $3, CURRENT_DATE, $4, $5, 'approved', 1, $6, $7, $8, false,
+              $9, $10, $11, 'NAPS2 Scanner', 'Scanned via NAPS2', NOW()
+            ) RETURNING *
+          `, [
+            docId, title, newReference, userName, userId, ext,
+            fileSizeStr, folderId, `uploads/${newFileName}`, department, fileBuffer
+          ]);
+        } catch (retryError) {
+          await client.query('ROLLBACK');
+          throw retryError;
+        }
+      } else {
+        await client.query('ROLLBACK');
+        throw error;
+      }
+    }
 
     // Optimized activity log insert (combined with document insert in same transaction)
     await client.query(`
