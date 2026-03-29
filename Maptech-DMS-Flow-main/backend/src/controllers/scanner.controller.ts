@@ -646,7 +646,66 @@ export const startScan = async (req: AuthRequest, res: Response) => {
           await pool.query(`
             UPDATE scan_sessions SET status = 'failed', error_message = $1 WHERE id = $2
           `, [errorMsg, sessionId]);
+          // Remove from pending scans since we're handling it here
+          scanWatcher.removePendingScan(sessionId);
           return res.status(500).json({ error: errorMsg });
+        }
+
+        // For network scanners, process the file inline instead of relying on watcher
+        // This avoids race conditions where the watcher hasn't processed the file yet
+        if (fs.existsSync(outputPath)) {
+          const fileStats = fs.statSync(outputPath);
+
+          if (isMultiPage && batchId) {
+            // Handle multi-page batch inline
+            const batch = scanWatcher.getMultiPageBatch(batchId);
+            if (batch) {
+              const batchDir = path.join(process.cwd(), 'uploads', 'scan-batches', batchId);
+              if (!fs.existsSync(batchDir)) {
+                fs.mkdirSync(batchDir, { recursive: true });
+              }
+
+              const pageFileName = `page_${String(normalizedPageNumber).padStart(3, '0')}_${Date.now()}.${effectiveFormat}`;
+              const batchFilePath = path.join(batchDir, pageFileName);
+
+              fs.copyFileSync(outputPath, batchFilePath);
+
+              // Add page to batch
+              batch.pages.push({
+                sessionId,
+                pageNumber: normalizedPageNumber,
+                filePath: batchFilePath,
+                ext: effectiveFormat,
+                sizeBytes: fileStats.size,
+                createdAt: new Date()
+              });
+
+              batch.pages.sort((a, b) => a.pageNumber - b.pageNumber || a.createdAt.getTime() - b.createdAt.getTime());
+
+              console.log(`Network scanner: Captured page ${normalizedPageNumber} for batch ${batchId}`);
+            }
+
+            // Update session status
+            await pool.query(`
+              UPDATE scan_sessions SET status = 'completed', completed_at = NOW() WHERE id = $1
+            `, [sessionId]);
+
+            // Remove from pending scans
+            scanWatcher.removePendingScan(sessionId);
+
+            // Delete original scan file
+            try {
+              fs.unlinkSync(outputPath);
+            } catch (e) {
+              console.log(`Could not delete scan file: ${outputPath}`);
+            }
+          } else {
+            // Single page scan - let watcher handle it for document creation
+            // Just update status since watcher will create the document
+            await pool.query(`
+              UPDATE scan_sessions SET status = 'scanning' WHERE id = $1
+            `, [sessionId]);
+          }
         }
 
         return res.json({
@@ -656,7 +715,7 @@ export const startScan = async (req: AuthRequest, res: Response) => {
           multiPage: isMultiPage,
           message: `Scanned with ${actualDeviceName}`,
           scansDirectory: scansDir,
-          status: 'completed',
+          status: isMultiPage ? 'completed' : 'scanning',
           manualMode: false,
           networkScanner: true,
           scanSettings: { dpi: effectiveDpi, colorMode: effectiveColorMode, paperSize: effectivePaperSize }

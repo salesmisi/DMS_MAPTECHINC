@@ -389,7 +389,19 @@ export function ScannerDashboard() {
         setScanError(`NAPS2 not found. Please scan your document manually and save it to: ${data.scansDirectory}`);
       }
 
-      // Start polling for completion
+      // For network scanners with multi-page, the scan is already processed
+      // Handle completion immediately without polling
+      if (data.networkScanner && isMultiPageScan && data.status === 'completed') {
+        setScanning(false);
+        setScanComplete(true);
+        setCurrentSessionId(null);
+        setScannedPages((prev) => prev + 1);
+        setTimeout(() => setScanComplete(false), 3000);
+        await loadRecentScans();
+        return;
+      }
+
+      // Start polling for completion (for USB scanners or single-page network scans)
       pollScanStatus(data.sessionId, {
         multiPage: isMultiPageScan,
         batchId: data.batchId || activeBatchId || undefined
