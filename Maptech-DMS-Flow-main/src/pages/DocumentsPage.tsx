@@ -269,7 +269,7 @@ export function DocumentsPage() {
   const { t } = useLanguage();
 
   // State
-  const [activeTab, setActiveTab] = useState<'recent' | 'favorites'>('recent');
+  const [activeTab, setActiveTab] = useState<'recent' | 'favorites' | 'shared'>('recent');
   const [search, setSearch] = useState('');
   const [searchSelectedDocId, setSearchSelectedDocId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
@@ -372,11 +372,14 @@ export function DocumentsPage() {
       }
     }
 
+
     // Filter by tab
     if (activeTab === 'recent') {
       result = result.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     } else if (activeTab === 'favorites') {
       result = result.filter(d => d.isFavorite);
+    } else if (activeTab === 'shared') {
+      result = result.filter(d => d.isShared);
     }
 
     return result;
@@ -617,6 +620,19 @@ export function DocumentsPage() {
                 <div className="flex items-center gap-2">
                   <Star size={16} />
                   Favorites
+                </div>
+              </button>
+              <button
+                onClick={() => setActiveTab('shared')}
+                className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
+                  activeTab === 'shared'
+                    ? 'text-[#005F02] dark:text-[#427A43] border-[#005F02]'
+                    : 'text-gray-600 dark:text-gray-400 border-transparent hover:text-gray-900 dark:hover:text-gray-200'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <Lock size={16} />
+                  Shared
                 </div>
               </button>
             </div>
