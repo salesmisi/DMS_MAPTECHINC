@@ -24,8 +24,10 @@ import {
   Grid,
   List,
   Lock,
-  X
+  X,
+  Pencil
 } from 'lucide-react';
+import { Share as ShareIcon } from 'lucide-react';
 import { useDocuments, Document } from '../context/DocumentContext';
 import { useAuth } from '../context/AuthContext';
 import { UploadModal } from '../components/UploadModal';
@@ -34,7 +36,10 @@ import FilePreview from '../components/FilePreview';
 import { useNavigation } from '../App';
 import { useLanguage } from '../context/LanguageContext';
 import { CreateFolderModal } from '../components/CreateFolderModal';
+import { EditFolderModal } from '../components/EditFolderModal';
 import { UnifiedSearch } from '../components/UnifiedSearch';
+import { apiUrl } from '../utils/api';
+import { ShareDialog } from '../components/ShareDialog';
 
 // Quick Access folder card component
 interface QuickAccessCardProps {
@@ -75,6 +80,7 @@ interface SidebarFolderItemProps {
     visibility?: string;
     createdByRole?: 'admin' | 'manager' | 'staff';
     isDepartment?: boolean;
+    createdById?: string;
   };
   selectedFolder: string | null;
   selectFolder: (id: string | null) => void;
@@ -85,14 +91,17 @@ interface SidebarFolderItemProps {
     visibility?: string;
     createdByRole?: 'admin' | 'manager' | 'staff';
     isDepartment?: boolean;
+    createdById?: string;
   }[];
   level: number;
   onCreateSubfolder: (parentId: string) => void;
   onDeleteFolder: (folderId: string) => void;
+  onEditFolder: (folderId: string) => void;
   userRole?: string;
+  userId?: string;
 }
 
-function SidebarFolderItem({ folder, selectedFolder, selectFolder, getChildren, level, onCreateSubfolder, onDeleteFolder, userRole }: SidebarFolderItemProps) {
+function SidebarFolderItem({ folder, selectedFolder, selectFolder, getChildren, level, onCreateSubfolder, onDeleteFolder, onEditFolder, userRole, userId }: SidebarFolderItemProps) {
   const [expanded, setExpanded] = useState(level < 1);
   const [isHovered, setIsHovered] = useState(false);
   const children = getChildren(folder.id);
@@ -109,6 +118,13 @@ function SidebarFolderItem({ folder, selectedFolder, selectFolder, getChildren, 
     folder.isDepartment === true;
 
   const canDelete = userRole === 'admin' || userRole === 'manager';
+
+  // Edit permission: admin/manager can edit non-department folders, users can edit their own folders
+  const canEdit = !folder.isDepartment && (
+    userRole === 'admin' ||
+    userRole === 'manager' ||
+    (folder.createdById === userId && folder.createdByRole === 'staff')
+  );
 
   // Staff can add subfolders to locked folders (assigned to them)
   // Admin/Manager can add subfolders to any folder
@@ -141,6 +157,8 @@ function SidebarFolderItem({ folder, selectedFolder, selectFolder, getChildren, 
           <span className="w-5" />
         )}
         <Folder size={16} className={isSelected ? 'text-[#005F02]' : 'text-[#dcb67a]'} />
+
+        {/* Folder name */}
         <span className="text-sm truncate flex-1">{folder.name}</span>
 
         {/* Lock icon for admin/manager created or auto-generated folders */}
@@ -149,8 +167,20 @@ function SidebarFolderItem({ folder, selectedFolder, selectFolder, getChildren, 
         )}
 
         {/* Action icons on hover */}
-        {isHovered && (canAddSubfolder || canDelete) && (
+        {isHovered && (canEdit || canAddSubfolder || canDelete) && (
           <div className="flex items-center gap-0.5 ml-auto">
+            {canEdit && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onEditFolder(folder.id);
+                }}
+                className="p-1 hover:bg-gray-200 dark:hover:bg-[#4d4d4d] rounded text-gray-500 hover:text-blue-600"
+                title="Edit folder"
+              >
+                <Pencil size={14} />
+              </button>
+            )}
             {canAddSubfolder && (
               <button
                 onClick={(e) => {
@@ -190,7 +220,9 @@ function SidebarFolderItem({ folder, selectedFolder, selectFolder, getChildren, 
               level={level + 1}
               onCreateSubfolder={onCreateSubfolder}
               onDeleteFolder={onDeleteFolder}
+              onEditFolder={onEditFolder}
               userRole={userRole}
+              userId={userId}
             />
           ))}
         </div>
@@ -263,7 +295,8 @@ export function DocumentsPage() {
     archiveDocument,
     deleteFolder,
     addFolder,
-    updateDocument
+    updateDocument,
+    updateFolder
   } = useDocuments();
   const { selectedFolderId, selectFolder } = useNavigation();
   const { t } = useLanguage();
@@ -282,6 +315,10 @@ export function DocumentsPage() {
   const [requestDeleteModal, setRequestDeleteModal] = useState(false);
   const [deleteModal, setDeleteModal] = useState(false);
   const [deleteFolderId, setDeleteFolderId] = useState<string | null>(null);
+  const [editFolderId, setEditFolderId] = useState<string | null>(null);
+  // Share dialog state
+  const [shareDoc, setShareDoc] = useState<Document | null>(null);
+  const [showShareDialog, setShowShareDialog] = useState(false);
 
   // Sidebar resize state
   const [sidebarWidth, setSidebarWidth] = useState(224);
@@ -317,14 +354,7 @@ export function DocumentsPage() {
   }, [documents]);
 
   // Role-based folder visibility
-  const visibleFolders = useMemo(() => {
-    if (!user) return [];
-    if (user.role === 'admin') return folders;
-    if (user.role === 'manager') {
-      return folders.filter(f => f.department === user.department || !f.department);
-    }
-    return folders.filter(f => f.department === user.department || !f.department);
-  }, [folders, user]);
+  const visibleFolders = useMemo(() => folders, [folders]);
 
   const rootFolders = visibleFolders.filter(f => f.parentId === null);
   const getChildren = (parentId: string) => visibleFolders.filter(f => f.parentId === parentId);
@@ -335,6 +365,8 @@ export function DocumentsPage() {
     if (user.role === 'admin') return true;
     // Check if user uploaded the document (using uploadedById not uploadedBy)
     if (doc.uploadedById === user.id) return true;
+    // Check if document is shared with the user
+    if (doc.isShared) return true;
     if (user.role === 'manager' && doc.department === user.department) return true;
 
     // Staff access logic
@@ -349,7 +381,22 @@ export function DocumentsPage() {
   const filtered = useMemo(() => {
     let result = activeDocuments.filter(d => hasDocumentAccess(d));
 
-    // Filter by selected folder
+    // For "Shared" tab, show ALL shared documents regardless of folder
+    if (activeTab === 'shared') {
+      result = result.filter(d => d.isShared);
+      // Still apply search filter
+      if (search) {
+        const searchLower = search.toLowerCase();
+        result = result.filter(d =>
+          d.title.toLowerCase().includes(searchLower) ||
+          d.reference?.toLowerCase().includes(searchLower) ||
+          d.department?.toLowerCase().includes(searchLower)
+        );
+      }
+      return result;
+    }
+
+    // Filter by selected folder (only for non-shared tabs)
     if (selectedFolderId) {
       result = result.filter(d => d.folderId === selectedFolderId);
     }
@@ -378,8 +425,6 @@ export function DocumentsPage() {
       result = result.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     } else if (activeTab === 'favorites') {
       result = result.filter(d => d.isFavorite);
-    } else if (activeTab === 'shared') {
-      result = result.filter(d => d.isShared);
     }
 
     return result;
@@ -429,7 +474,7 @@ export function DocumentsPage() {
   const handleDownload = async (doc: Document) => {
     try {
       const token = localStorage.getItem('dms_token');
-      const res = await fetch(`http://localhost:5000/api/documents/${doc.id}/download`, {
+      const res = await fetch(apiUrl(`/documents/${doc.id}/download`), {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!res.ok) throw new Error('Download failed');
@@ -554,7 +599,11 @@ export function DocumentsPage() {
                 onDeleteFolder={(folderId) => {
                   setDeleteFolderId(folderId);
                 }}
+                onEditFolder={(folderId) => {
+                  setEditFolderId(folderId);
+                }}
                 userRole={user?.role}
+                userId={user?.id}
               />
             ))}
           </div>
@@ -805,6 +854,25 @@ export function DocumentsPage() {
                           >
                             <Download size={16} />
                           </button>
+                          <button
+                            onClick={() => {
+                              setShareDoc(doc);
+                              setShowShareDialog(true);
+                            }}
+                            className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors"
+                            title="Share"
+                          >
+                            <ShareIcon size={16} />
+                          </button>
+                                {/* Share Dialog Modal */}
+                                {user && (
+                                  <ShareDialog
+                                    isOpen={showShareDialog}
+                                    onClose={() => setShowShareDialog(false)}
+                                    document={shareDoc}
+                                    currentUser={user}
+                                  />
+                                )}
                           {user?.role === 'admin' && (
                             <>
                               <button
@@ -913,6 +981,20 @@ export function DocumentsPage() {
           parentFolderId={newFolderParentId}
         />
       )}
+
+      {editFolderId && (() => {
+        const folderToEdit = folders.find(f => f.id === editFolderId);
+        if (!folderToEdit) return null;
+        return (
+          <EditFolderModal
+            folder={folderToEdit}
+            onClose={() => setEditFolderId(null)}
+            onSave={(folderId, updates) => {
+              updateFolder(folderId, updates);
+            }}
+          />
+        );
+      })()}
 
       {viewingDoc && (
         <div className="fixed inset-0 bg-black/50 dark:bg-black/70 z-50 flex items-center justify-center p-4">
