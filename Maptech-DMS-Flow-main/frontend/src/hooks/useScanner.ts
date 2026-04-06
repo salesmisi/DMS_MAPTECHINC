@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { PDFDocument } from 'pdf-lib';
 import {
   checkAgent,
+  discardScan,
   getPreview,
+  getPreviewBlob,
   getScanners,
-  scanDocument,
   scanWithPreview,
-  uploadScan,
+  uploadScannedFile,
   type PreviewResult,
-  type ScanDocumentPayload,
   type ScanPreviewPayload,
   type ScannerAgentDevice,
 } from '../services/scannerService';
@@ -19,7 +20,60 @@ export interface ScannerFlowValues {
   dpi?: number;
   color?: string;
   paperSize?: string;
+  scanSource?: string;
+  format?: string;
 }
+
+interface MultiPageScanItem {
+  id: string;
+  previewUrl: string;
+  blob: Blob;
+}
+
+export interface RecentScanEntry {
+  id: string;
+  title: string;
+  status: 'success' | 'failed';
+  message: string;
+  createdAt: string;
+  documentId?: string;
+  fileType?: string;
+}
+
+const buildRecentScanEntry = (
+  status: 'success' | 'failed',
+  title: string,
+  message: string,
+  document?: Record<string, unknown> | null,
+  fallbackFileType?: string,
+): RecentScanEntry => ({
+  id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  title,
+  status,
+  message,
+  createdAt: new Date().toISOString(),
+  documentId: typeof document?.id === 'string' ? document.id : undefined,
+  fileType: typeof document?.file_type === 'string'
+    ? document.file_type
+    : typeof document?.fileType === 'string'
+      ? document.fileType
+      : fallbackFileType,
+});
+
+const extractDocumentRecord = (result: unknown) => {
+  if (!result || typeof result !== 'object') {
+    return null;
+  }
+
+  const typedResult = result as Record<string, unknown>;
+  const nestedDocument = typedResult.document;
+
+  if (nestedDocument && typeof nestedDocument === 'object') {
+    return nestedDocument as Record<string, unknown>;
+  }
+
+  return typedResult;
+};
 
 const normalizeFolderId = (folderId: string) => {
   const trimmedFolderId = folderId.trim();
@@ -42,6 +96,23 @@ export function useScanner() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewContentType, setPreviewContentType] = useState<string | null>(null);
   const previewObjectUrlRef = useRef<string | null>(null);
+  const [multiPageScans, setMultiPageScans] = useState<MultiPageScanItem[]>([]);
+  const multiPageScansRef = useRef<MultiPageScanItem[]>([]);
+  const [recentScans, setRecentScans] = useState<RecentScanEntry[]>([]);
+
+  const prependRecentScan = useCallback((entry: RecentScanEntry) => {
+    setRecentScans((current) => [entry, ...current].slice(0, 8));
+  }, []);
+
+  const getResolvedScanner = useCallback((requestedScannerId?: string) => {
+    const resolvedScannerId = requestedScannerId || selectedScanner;
+
+    if (!resolvedScannerId) {
+      return null;
+    }
+
+    return scanners.find((scanner) => scanner.id === resolvedScannerId) || null;
+  }, [scanners, selectedScanner]);
 
   const clearPreview = useCallback(() => {
     if (previewObjectUrlRef.current) {
@@ -52,6 +123,13 @@ export function useScanner() {
     setPreviewSessionId(null);
     setPreviewUrl(null);
     setPreviewContentType(null);
+  }, []);
+
+  const clearMultiPageScans = useCallback(() => {
+    setMultiPageScans((current) => {
+      current.forEach((item) => URL.revokeObjectURL(item.previewUrl));
+      return [];
+    });
   }, []);
 
   const initializeScanner = useCallback(async () => {
@@ -66,7 +144,6 @@ export function useScanner() {
       if (!online) {
         setScanners([]);
         setSelectedScanner('');
-        setError('Scanner agent not running. Please install or start the scanner agent.');
         return false;
       }
 
@@ -85,7 +162,6 @@ export function useScanner() {
       setAgentOnline(false);
       setScanners([]);
       setSelectedScanner('');
-      setError(err instanceof Error ? err.message : 'Failed to initialize the scanner agent.');
       return false;
     } finally {
       setLoading(false);
@@ -93,10 +169,18 @@ export function useScanner() {
   }, []);
 
   useEffect(() => {
+    multiPageScansRef.current = multiPageScans;
+  }, [multiPageScans]);
+
+  useEffect(() => {
     return () => {
       if (previewObjectUrlRef.current) {
         URL.revokeObjectURL(previewObjectUrlRef.current);
       }
+
+      multiPageScansRef.current.forEach((item) => {
+        URL.revokeObjectURL(item.previewUrl);
+      });
     };
   }, []);
 
@@ -106,27 +190,54 @@ export function useScanner() {
     setSuccessMessage(null);
 
     try {
-      const payload: ScanDocumentPayload = {
-        title: values.title.trim(),
-        folder_id: normalizeFolderId(values.folderId),
-        scanner: values.scanner || selectedScanner || undefined,
+      const resolvedScanner = getResolvedScanner(values.scanner);
+      const normalizedFolderId = normalizeFolderId(values.folderId);
+      const payload: ScanPreviewPayload = {
+        scanner: resolvedScanner?.name || values.scanner || selectedScanner || undefined,
+        driver: resolvedScanner?.driver,
         dpi: values.dpi,
         color: values.color,
         paperSize: values.paperSize,
+        scanSource: values.scanSource,
+        format: values.format,
       };
 
-      const result = await scanDocument(payload);
+      const sessionId = await scanWithPreview(payload);
+      const scannedBlob = await getPreviewBlob(sessionId);
+
+      try {
+        await discardScan(sessionId);
+      } catch {
+        // Best-effort cleanup only.
+      }
+
+      const result = await uploadScannedFile(
+        scannedBlob,
+        values.title.trim(),
+        normalizedFolderId,
+        values.format || 'pdf'
+      );
       setSuccessMessage('Document scanned and uploaded successfully.');
+      prependRecentScan(
+        buildRecentScanEntry(
+          'success',
+          values.title.trim(),
+          'Scan completed successfully.',
+          extractDocumentRecord(result),
+          values.format || 'pdf',
+        )
+      );
       clearPreview();
       return result;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Scan failed.';
       setError(message);
+      prependRecentScan(buildRecentScanEntry('failed', values.title.trim() || 'Untitled scan', message));
       throw err;
     } finally {
       setLoading(false);
     }
-  }, [clearPreview, selectedScanner]);
+  }, [clearPreview, getResolvedScanner, prependRecentScan, selectedScanner]);
 
   const scanWithPreviewFlow = useCallback(async (values?: Omit<ScannerFlowValues, 'title' | 'folderId'>) => {
     setLoading(true);
@@ -134,11 +245,15 @@ export function useScanner() {
     setSuccessMessage(null);
 
     try {
+      const resolvedScanner = getResolvedScanner(values?.scanner);
       const payload: ScanPreviewPayload = {
-        scanner: values?.scanner || selectedScanner || undefined,
+        scanner: resolvedScanner?.name || values?.scanner || selectedScanner || undefined,
+        driver: resolvedScanner?.driver,
         dpi: values?.dpi,
         color: values?.color,
         paperSize: values?.paperSize,
+        scanSource: values?.scanSource,
+        format: values?.format,
       };
 
       clearPreview();
@@ -162,7 +277,7 @@ export function useScanner() {
     } finally {
       setLoading(false);
     }
-  }, [clearPreview, selectedScanner]);
+  }, [clearPreview, getResolvedScanner, selectedScanner]);
 
   const uploadPreview = useCallback(async (title: string, folderId: string) => {
     if (!previewSessionId) {
@@ -176,18 +291,127 @@ export function useScanner() {
     setSuccessMessage(null);
 
     try {
-      const result = await uploadScan(previewSessionId, title.trim(), normalizeFolderId(folderId));
+      const normalizedFolderId = normalizeFolderId(folderId);
+      const previewBlob = await getPreviewBlob(previewSessionId);
+
+      try {
+        await discardScan(previewSessionId);
+      } catch {
+        // Best-effort cleanup only.
+      }
+
+      const effectiveFormat = previewBlob.type.includes('png')
+        ? 'png'
+        : previewBlob.type.includes('jpeg')
+          ? 'jpg'
+          : 'pdf';
+
+      const result = await uploadScannedFile(previewBlob, title.trim(), normalizedFolderId, effectiveFormat);
       setSuccessMessage('Scanned document uploaded successfully.');
+      prependRecentScan(
+        buildRecentScanEntry('success', title.trim(), 'Preview scan uploaded successfully.', extractDocumentRecord(result), 'pdf')
+      );
       clearPreview();
       return result;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Upload failed.';
       setError(message);
+      prependRecentScan(buildRecentScanEntry('failed', title.trim() || 'Untitled scan', message));
       throw err;
     } finally {
       setLoading(false);
     }
-  }, [clearPreview, previewSessionId]);
+  }, [clearPreview, prependRecentScan, previewSessionId]);
+
+  const addMultiPageScan = useCallback(async (values?: Omit<ScannerFlowValues, 'title' | 'folderId'>) => {
+    setLoading(true);
+    setError(null);
+    setSuccessMessage(null);
+
+    try {
+      const resolvedScanner = getResolvedScanner(values?.scanner);
+      const payload: ScanPreviewPayload = {
+        scanner: resolvedScanner?.name || values?.scanner || selectedScanner || undefined,
+        driver: resolvedScanner?.driver,
+        dpi: values?.dpi,
+        color: values?.color,
+        paperSize: values?.paperSize,
+        scanSource: values?.scanSource,
+        format: 'pdf',
+      };
+
+      clearPreview();
+
+      const sessionId = await scanWithPreview(payload);
+      const pageBlob = await getPreviewBlob(sessionId);
+      const pagePreviewUrl = URL.createObjectURL(pageBlob);
+
+      try {
+        await discardScan(sessionId);
+      } catch {
+        // Best-effort cleanup only; the page blob is already loaded in-browser.
+      }
+
+      setMultiPageScans((current) => [
+        ...current,
+        {
+          id: sessionId,
+          previewUrl: pagePreviewUrl,
+          blob: pageBlob,
+        },
+      ]);
+      setSuccessMessage(`Page ${multiPageScans.length + 1} captured. Continue scanning or finalize the PDF.`);
+
+      return sessionId;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Multi-page scan failed.';
+      setError(message);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, [clearPreview, getResolvedScanner, multiPageScans.length, selectedScanner]);
+
+  const finalizeMultiPageUpload = useCallback(async (title: string, folderId: string) => {
+    if (multiPageScans.length === 0) {
+      const message = 'No scanned pages are available to combine.';
+      setError(message);
+      throw new Error(message);
+    }
+
+    setLoading(true);
+    setError(null);
+    setSuccessMessage(null);
+
+    try {
+      const mergedDocument = await PDFDocument.create();
+
+      for (const item of multiPageScans) {
+        const pageBytes = await item.blob.arrayBuffer();
+        const sourceDocument = await PDFDocument.load(pageBytes);
+        const copiedPages = await mergedDocument.copyPages(sourceDocument, sourceDocument.getPageIndices());
+        copiedPages.forEach((page) => mergedDocument.addPage(page));
+      }
+
+      const mergedBytes = await mergedDocument.save();
+      const mergedBlob = new Blob([mergedBytes], { type: 'application/pdf' });
+      const result = await uploadScannedFile(mergedBlob, title.trim(), normalizeFolderId(folderId), 'pdf');
+
+      clearMultiPageScans();
+      setSuccessMessage('Multi-page PDF scanned and uploaded successfully.');
+      prependRecentScan(
+        buildRecentScanEntry('success', title.trim(), 'Multi-page PDF uploaded successfully.', extractDocumentRecord(result), 'pdf')
+      );
+      return result;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Multi-page PDF upload failed.';
+      setError(message);
+      prependRecentScan(buildRecentScanEntry('failed', title.trim() || 'Untitled scan', message));
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, [clearMultiPageScans, multiPageScans]);
 
   return {
     agentOnline,
@@ -200,10 +424,15 @@ export function useScanner() {
     previewSessionId,
     previewUrl,
     previewContentType,
+    multiPageScans,
+    recentScans,
     initializeScanner,
     scanNow,
     scanWithPreviewFlow,
     uploadPreview,
+    addMultiPageScan,
+    finalizeMultiPageUpload,
+    clearMultiPageScans,
     cancelPreview: clearPreview,
     clearMessages: () => {
       setError(null);

@@ -212,6 +212,8 @@ function uploadDocumentToBackend({ authHeader, filePath, title, folderId, depart
   });
   form.append('title', title);
   form.append('folder_id', String(folderId));
+  form.append('needs_approval', 'false');
+  form.append('scanned_from', 'local_scanner_agent');
   if (departmentId) form.append('department_id', String(departmentId));
   if (description) form.append('description', description);
 

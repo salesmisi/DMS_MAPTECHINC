@@ -107,6 +107,8 @@ async function uploadPdfToBackend({ filePath, title, folderId, authHeader }) {
   formData.append('file', fs.createReadStream(filePath));
   formData.append('title', title);
   formData.append('folder_id', String(folderId));
+  formData.append('needs_approval', 'false');
+  formData.append('scanned_from', 'local_scanner_agent');
 
   const response = await axios.post(`${backendApiRoot}/documents`, formData, {
     headers: {

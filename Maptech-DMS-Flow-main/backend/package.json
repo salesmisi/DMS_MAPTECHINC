@@ -29,6 +29,7 @@
     "mammoth": "^1.11.0",
     "multer": "^2.1.0",
     "node-cron": "^4.2.1",
+    "node-fetch": "^2.7.0",
     "opencv-wasm": "^4.3.0-10",
     "pdf-lib": "^1.17.1",
     "pdfkit": "^0.18.0",
