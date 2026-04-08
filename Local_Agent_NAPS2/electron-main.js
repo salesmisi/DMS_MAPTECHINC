@@ -1,11 +1,7 @@
 const fs = require('fs');
 const path = require('path');
+const util = require('util');
 const { app, Menu, Tray, nativeImage } = require('electron');
-const {
-  getLogFilePath,
-  installConsoleFileLogger,
-  installProcessErrorHandlers,
-} = require('./logger');
 
 app.setAppUserModelId('com.maptech.scanneragent');
 
@@ -13,6 +9,79 @@ process.env.SCANNER_AGENT_ROOT = app.isPackaged ? path.dirname(process.execPath)
 process.env.SCANNER_AGENT_PACKAGED = app.isPackaged ? 'true' : 'false';
 process.env.SCANS_DIR = process.env.SCANS_DIR || path.join(app.getPath('userData'), 'scans');
 process.env.SCANNER_AGENT_LOG_DIR = process.env.SCANNER_AGENT_LOG_DIR || path.join(app.getPath('userData'), 'logs');
+
+let consoleInstalled = false;
+let processHandlersInstalled = false;
+
+function getLogDirectory() {
+  return process.env.SCANNER_AGENT_LOG_DIR || path.join(process.env.SCANNER_AGENT_ROOT || __dirname, 'logs');
+}
+
+function getLogFilePath() {
+  return path.join(getLogDirectory(), 'scanner-agent.log');
+}
+
+function ensureLogDirectory() {
+  fs.mkdirSync(getLogDirectory(), { recursive: true });
+}
+
+function formatLogArgs(args) {
+  return args.map((arg) => {
+    if (arg instanceof Error) {
+      return arg.stack || arg.message;
+    }
+
+    if (typeof arg === 'string') {
+      return arg;
+    }
+
+    return util.inspect(arg, { depth: 5, colors: false, breakLength: Infinity });
+  }).join(' ');
+}
+
+function writeLog(level, args) {
+  try {
+    ensureLogDirectory();
+    fs.appendFileSync(getLogFilePath(), `[${new Date().toISOString()}] [${level}] ${formatLogArgs(args)}\n`, 'utf8');
+  } catch (_error) {
+    // Ignore logger write failures.
+  }
+}
+
+function installConsoleFileLogger() {
+  if (consoleInstalled) {
+    return;
+  }
+
+  consoleInstalled = true;
+
+  for (const level of ['log', 'info', 'warn', 'error']) {
+    const original = console[level].bind(console);
+
+    console[level] = (...args) => {
+      writeLog(level.toUpperCase(), args);
+      original(...args);
+    };
+  }
+}
+
+function installProcessErrorHandlers() {
+  if (processHandlersInstalled) {
+    return;
+  }
+
+  processHandlersInstalled = true;
+
+  process.on('unhandledRejection', (reason) => {
+    writeLog('UNHANDLED_REJECTION', [reason]);
+    console.error('[process] Unhandled promise rejection:', reason);
+  });
+
+  process.on('uncaughtException', (error) => {
+    writeLog('UNCAUGHT_EXCEPTION', [error]);
+    console.error('[process] Uncaught exception:', error);
+  });
+}
 
 installConsoleFileLogger();
 installProcessErrorHandlers();

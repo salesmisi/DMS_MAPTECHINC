@@ -9,13 +9,88 @@ const dotenv = require('dotenv');
 const { exec } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const util = require('util');
 const axios = require('axios');
 const FormData = require('form-data');
 const { v4: uuidv4 } = require('uuid');
-const {
-  installConsoleFileLogger,
-  installProcessErrorHandlers,
-} = require('./logger');
+
+let consoleInstalled = false;
+let processHandlersInstalled = false;
+
+function getLogDirectory() {
+  return process.env.SCANNER_AGENT_LOG_DIR || path.join(process.env.SCANNER_AGENT_ROOT || __dirname, 'logs');
+}
+
+function getLogFilePath() {
+  return path.join(getLogDirectory(), 'scanner-agent.log');
+}
+
+function ensureLogDirectory() {
+  fs.mkdirSync(getLogDirectory(), { recursive: true });
+}
+
+function formatLogArgs(args) {
+  return args.map((arg) => {
+    if (arg instanceof Error) {
+      return arg.stack || arg.message;
+    }
+
+    if (typeof arg === 'string') {
+      return arg;
+    }
+
+    return util.inspect(arg, { depth: 5, colors: false, breakLength: Infinity });
+  }).join(' ');
+}
+
+function writeLog(level, args) {
+  try {
+    ensureLogDirectory();
+    fs.appendFileSync(getLogFilePath(), `[${new Date().toISOString()}] [${level}] ${formatLogArgs(args)}\n`, 'utf8');
+  } catch (_error) {
+    // Ignore logger write failures.
+  }
+}
+
+function installConsoleFileLogger() {
+  if (consoleInstalled) {
+    return;
+  }
+
+  consoleInstalled = true;
+
+  for (const level of ['log', 'info', 'warn', 'error']) {
+    const original = console[level].bind(console);
+
+    console[level] = (...args) => {
+      writeLog(level.toUpperCase(), args);
+      original(...args);
+    };
+  }
+}
+
+function installProcessErrorHandlers(options = {}) {
+  if (processHandlersInstalled) {
+    return;
+  }
+
+  processHandlersInstalled = true;
+  const { exitOnUncaughtException = false } = options;
+
+  process.on('unhandledRejection', (reason) => {
+    writeLog('UNHANDLED_REJECTION', [reason]);
+    console.error('[process] Unhandled promise rejection:', reason);
+  });
+
+  process.on('uncaughtException', (error) => {
+    writeLog('UNCAUGHT_EXCEPTION', [error]);
+    console.error('[process] Uncaught exception:', error);
+
+    if (exitOnUncaughtException) {
+      process.exitCode = 1;
+    }
+  });
+}
 
 installConsoleFileLogger();
 installProcessErrorHandlers({ exitOnUncaughtException: false });
