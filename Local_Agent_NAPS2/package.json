@@ -10,7 +10,7 @@
     "dev": "electron .",
     "dev:server": "node --watch server.js",
     "build": "electron-builder --win dir",
-    "build:installer": "iscc ScannerAgent.iss"
+    "build:installer": "node build-installer.js"
   },
   "dependencies": {
     "axios": "^1.7.9",
@@ -34,6 +34,8 @@
       "output": "dist"
     },
     "files": [
+      "assets/**/*",
+      "build-installer.js",
       "electron-main.js",
       "logger.js",
       "server.js",
@@ -43,6 +45,7 @@
       "target": [
         "dir"
       ],
+      "icon": "assets/scanner-agent.ico",
       "executableName": "scanner-agent",
       "signAndEditExecutable": false
     }
