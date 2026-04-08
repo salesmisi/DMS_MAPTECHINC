@@ -2,3 +2,5 @@ node_modules/
 scans/
 .env
 *.log
+dist/
+logs/

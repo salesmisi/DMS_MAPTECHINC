@@ -31,6 +31,8 @@ interface ScannerPanelProps {
 export function ScannerPanel({ folders, onUploaded }: ScannerPanelProps) {
   const {
     agentOnline,
+    scannerAvailable,
+    scannerStatusMessage,
     scanners,
     selectedScanner,
     setSelectedScanner,
@@ -47,6 +49,7 @@ export function ScannerPanel({ folders, onUploaded }: ScannerPanelProps) {
     uploadPreview,
     addMultiPageScan,
     finalizeMultiPageUpload,
+    removeMultiPageScan,
     clearMultiPageScans,
     cancelPreview,
     clearMessages,
@@ -61,8 +64,6 @@ export function ScannerPanel({ folders, onUploaded }: ScannerPanelProps) {
   const [scanSource, setScanSource] = useState('glass');
   const [format, setFormat] = useState('pdf');
   const [multiPageEnabled, setMultiPageEnabled] = useState(false);
-  const [scannerAvailable, setScannerAvailable] = useState(false);
-  const [scannerStatusMessage, setScannerStatusMessage] = useState('Scanner agent not found');
   const [showDocumentTypeCodes, setShowDocumentTypeCodes] = useState(false);
 
   const formatRecentScanDate = (value: string) => {
@@ -122,43 +123,6 @@ export function ScannerPanel({ folders, onUploaded }: ScannerPanelProps) {
 
   const targetFolderId = subfolderId;
   const hasRequiredScanFields = Boolean(title.trim() && departmentFolderId && subfolderId);
-
-  const scannerHealthUrl = (() => {
-    const viteEnv = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
-    const apiBaseUrl = String(viteEnv?.VITE_API_URL || '').replace(/\/+$/, '');
-
-    return apiBaseUrl ? `${apiBaseUrl}/scan-health` : '/api/scan-health';
-  })();
-
-  const checkScannerAgent = async () => {
-    try {
-      const response = await fetch(scannerHealthUrl);
-      const data = await response.json();
-      const agent = data?.agent || data;
-      const backendConfigured = Boolean(agent?.backendUrl && !String(agent.backendUrl).includes('YOUR-RAILWAY-URL'));
-      const healthy = (agent?.status === 'ok' || agent?.ok === true) && agent?.naps2Installed !== false && backendConfigured;
-
-      if (healthy) {
-        setScannerAvailable(true);
-        setScannerStatusMessage('Scanner ready');
-      } else {
-        setScannerAvailable(false);
-        setScannerStatusMessage(
-          backendConfigured
-            ? 'Scanner agent not found'
-            : 'Scanner agent backend URL is not configured'
-        );
-      }
-    } catch {
-      setScannerAvailable(false);
-      setScannerStatusMessage('Scanner agent not found');
-    }
-  };
-
-  useEffect(() => {
-    void checkScannerAgent();
-    void initializeScanner();
-  }, []);
 
   useEffect(() => {
     if (!departmentFolderId && departmentFolders.length > 0) {
@@ -280,9 +244,14 @@ export function ScannerPanel({ folders, onUploaded }: ScannerPanelProps) {
     await onUploaded?.();
   };
 
+  const handleRemoveMultiPageScan = (scanId: string) => {
+    clearMessages();
+    removeMultiPageScan(scanId);
+  };
+
   const handleDetectScanners = async () => {
     clearMessages();
-    await initializeScanner();
+    await initializeScanner({ forceRefresh: true });
   };
 
   const handlePreviewRecentScan = async (documentId: string) => {
@@ -348,7 +317,7 @@ export function ScannerPanel({ folders, onUploaded }: ScannerPanelProps) {
         <div>
           <h2 className="text-2xl font-bold text-[#1f3d1c]">Local Scanner Agent</h2>
           <p className="mt-1 text-sm text-[#5f6f52]">
-            Scan from a local NAPS2-connected device and upload straight into the DMS.
+            Set up scanning by installing the Local Agent and NAPS2 on your computer first.
           </p>
         </div>
 
@@ -360,7 +329,7 @@ export function ScannerPanel({ folders, onUploaded }: ScannerPanelProps) {
           }`}
         >
           {scannerAvailable ? <CheckCircle2 size={16} /> : <WifiOff size={16} />}
-          <span>{scannerAvailable ? 'Scanner ready' : scannerStatusMessage}</span>
+          <span>{scannerStatusMessage}</span>
         </div>
       </div>
 
@@ -398,7 +367,7 @@ export function ScannerPanel({ folders, onUploaded }: ScannerPanelProps) {
             <button
               type="button"
               onClick={() => void handleDetectScanners()}
-              disabled={loading || !agentOnline}
+              disabled={loading}
               className="inline-flex items-center justify-center gap-2 rounded-full px-3 py-2 text-sm font-medium text-[#2f6b3f] transition hover:bg-[#f3f7ef] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {loading ? <Loader2 className="animate-spin" size={16} /> : <RotateCw size={16} />}
@@ -501,7 +470,7 @@ export function ScannerPanel({ folders, onUploaded }: ScannerPanelProps) {
                       <div className="flex flex-wrap gap-2">
                         <button
                           type="button"
-                          onClick={() => void handlePreviewRecentScan(scan.documentId!)}
+                          onClick={() => void handlePreviewRecentScan(scan.documentId)}
                           className="inline-flex items-center justify-center gap-2 rounded-2xl border border-[#c7be98] bg-white px-4 py-2 text-sm font-semibold text-[#3c4d2d] transition hover:bg-[#f4f0df]"
                         >
                           <Eye size={16} />
@@ -509,7 +478,7 @@ export function ScannerPanel({ folders, onUploaded }: ScannerPanelProps) {
                         </button>
                         <button
                           type="button"
-                          onClick={() => void handleDownloadRecentScan(scan.documentId!, scan.title, scan.fileType)}
+                          onClick={() => void handleDownloadRecentScan(scan.documentId, scan.title, scan.fileType)}
                           className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[#1f6f43] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#175736]"
                         >
                           <Download size={16} />
@@ -783,8 +752,7 @@ export function ScannerPanel({ folders, onUploaded }: ScannerPanelProps) {
         <button
           type="button"
           onClick={() => {
-            void checkScannerAgent();
-            void initializeScanner();
+            void initializeScanner({ forceRefresh: true });
           }}
           disabled={loading}
           className="inline-flex items-center justify-center gap-2 rounded-2xl border border-[#d7d1b4] px-5 py-3 text-sm font-semibold text-[#435233] transition hover:bg-[#f7f4e7] disabled:cursor-not-allowed disabled:opacity-60"
@@ -816,7 +784,18 @@ export function ScannerPanel({ folders, onUploaded }: ScannerPanelProps) {
           <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {multiPageScans.map((item, index) => (
               <div key={item.id} className="rounded-2xl border border-[#e3dbc1] bg-white p-3">
-                <div className="mb-3 text-sm font-semibold text-[#355130]">Page {index + 1}</div>
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div className="text-sm font-semibold text-[#355130]">Page {index + 1}</div>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveMultiPageScan(item.id)}
+                    disabled={loading}
+                    className="inline-flex items-center justify-center gap-1 rounded-full border border-[#d9cfae] px-2.5 py-1 text-xs font-semibold text-[#7a5d2f] transition hover:bg-[#fbf3df] disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <XCircle size={14} />
+                    Remove
+                  </button>
+                </div>
                 <iframe
                   src={item.previewUrl}
                   title={`Multi-page scan preview ${index + 1}`}

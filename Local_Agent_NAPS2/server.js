@@ -12,11 +12,20 @@ const path = require('path');
 const axios = require('axios');
 const FormData = require('form-data');
 const { v4: uuidv4 } = require('uuid');
+const {
+  installConsoleFileLogger,
+  installProcessErrorHandlers,
+} = require('./logger');
+
+installConsoleFileLogger();
+installProcessErrorHandlers({ exitOnUncaughtException: false });
 
 loadEnvironment();
 
 const app = express();
 const PORT = toInteger(process.env.PORT, 3001);
+let httpServer = null;
+const IS_PACKAGED_RUNTIME = process.env.SCANNER_AGENT_PACKAGED === 'true' || !!process.pkg;
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -125,7 +134,7 @@ function loadEnvironment() {
 }
 
 function getAppRoot() {
-  return process.pkg ? path.dirname(process.execPath) : __dirname;
+  return process.env.SCANNER_AGENT_ROOT || (process.pkg ? path.dirname(process.execPath) : __dirname);
 }
 
 function toInteger(value, fallback) {
@@ -238,7 +247,7 @@ app.get('/health', (_req, res) => {
   const naps2 = findNaps2();
   res.json({
     status: 'ok',
-    packaged: !!process.pkg,
+    packaged: IS_PACKAGED_RUNTIME,
     naps2Installed: !!naps2,
     naps2Path: naps2 || 'NOT FOUND',
     backendUrl: BACKEND_URL,
@@ -641,7 +650,7 @@ app.delete('/scan/:sessionId', (req, res) => {
 // Start server
 // ---------------------------------------------------------------------------
 
-app.listen(PORT, () => {
+function logStartupBanner() {
   const naps2 = findNaps2();
   console.log('');
   console.log('==============================================');
@@ -652,7 +661,7 @@ app.listen(PORT, () => {
   console.log(`  Backend:  ${BACKEND_URL}`);
   console.log(`  NAPS2:    ${naps2 || 'NOT FOUND'}`);
   console.log(`  Scans:    ${SCANS_DIR}`);
-  console.log(`  Mode:     ${process.pkg ? 'packaged' : 'node'}`);
+  console.log(`  Mode:     ${IS_PACKAGED_RUNTIME ? 'packaged' : 'node'}`);
   console.log('==============================================');
   console.log('');
 
@@ -660,4 +669,54 @@ app.listen(PORT, () => {
     console.warn('WARNING: NAPS2 not found! Scanning will not work.');
     console.warn('Install from https://www.naps2.com/ or set NAPS2_PATH in .env');
   }
-});
+}
+
+function startServer(port = PORT) {
+  if (httpServer) {
+    return Promise.resolve(httpServer);
+  }
+
+  return new Promise((resolve, reject) => {
+    const server = app.listen(port);
+
+    server.once('error', (error) => {
+      console.error('[server] Failed to start scanner agent:', error);
+      reject(error);
+    });
+
+    server.once('listening', () => {
+      httpServer = server;
+      logStartupBanner();
+      resolve(server);
+    });
+  });
+}
+
+function stopServer() {
+  if (!httpServer) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve, reject) => {
+    httpServer.close((error) => {
+      if (error) {
+        return reject(error);
+      }
+
+      httpServer = null;
+      resolve();
+    });
+  });
+}
+
+if (require.main === module) {
+  startServer().catch(() => {
+    process.exitCode = 1;
+  });
+}
+
+module.exports = {
+  app,
+  startServer,
+  stopServer,
+};
