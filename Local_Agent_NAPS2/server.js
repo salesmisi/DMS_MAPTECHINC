@@ -109,7 +109,9 @@ const IS_PACKAGED_RUNTIME = process.env.SCANNER_AGENT_PACKAGED === 'true' || !!p
 const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:5000';
 const APP_ROOT = getAppRoot();
 const SCANS_DIR = path.resolve(APP_ROOT, process.env.SCANS_DIR || 'scans');
-const BIN_DIR = path.resolve(APP_ROOT, 'bin');
+const BIN_DIR = process.env.BIN_DIR
+  ? path.resolve(process.env.BIN_DIR)
+  : path.resolve(APP_ROOT, 'bin');
 const SCAN_TIMEOUT = toInteger(process.env.SCAN_TIMEOUT, 300000); // 5 min default
 const NAPS2_NAMES = ['naps2.console.exe', 'NAPS2.Console.exe'];
 

@@ -37,7 +37,6 @@
       "assets/**/*",
       "build-installer.js",
       "electron-main.js",
-      "logger.js",
       "server.js",
       "package.json"
     ],

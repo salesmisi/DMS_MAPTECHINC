@@ -8,6 +8,7 @@ app.setAppUserModelId('com.maptech.scanneragent');
 process.env.SCANNER_AGENT_ROOT = app.isPackaged ? path.dirname(process.execPath) : __dirname;
 process.env.SCANNER_AGENT_PACKAGED = app.isPackaged ? 'true' : 'false';
 process.env.SCANS_DIR = process.env.SCANS_DIR || path.join(app.getPath('userData'), 'scans');
+process.env.BIN_DIR = process.env.BIN_DIR || path.join(app.getPath('userData'), 'bin');
 process.env.SCANNER_AGENT_LOG_DIR = process.env.SCANNER_AGENT_LOG_DIR || path.join(app.getPath('userData'), 'logs');
 
 let consoleInstalled = false;
