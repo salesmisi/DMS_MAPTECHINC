@@ -755,13 +755,38 @@ function hasAllowedPrinterStatus(printer) {
   return !printer.WorkOffline && (status === 'ok' || status === 'idle');
 }
 
-function isPhysicalPrinter(printer) {
+function resolvePrinterConnection(printer) {
+  const normalizedPortName = String(printer.PortName || '').trim().toLowerCase();
+  const normalizedName = String(printer.Name || '').trim().toLowerCase();
+
+  if (printer.Network) {
+    return 'network';
+  }
+
+  if (normalizedPortName.startsWith('ip_') || normalizedPortName.startsWith('wsd') || normalizedPortName.startsWith('http')) {
+    return 'network';
+  }
+
+  if (normalizedPortName.includes(':') && !normalizedPortName.startsWith('usb') && !normalizedPortName.startsWith('lpt') && !normalizedPortName.startsWith('com')) {
+    return 'network';
+  }
+
+  if (normalizedName.includes('(network)')) {
+    return 'network';
+  }
+
+  return 'local';
+}
+
+function isInstalledPhysicalPrinter(printer) {
   const deviceName = `${printer.Name || ''} ${printer.DriverName || ''}`;
-  return printer.Local && !printer.Network && !VIRTUAL_PRINTER_PATTERN.test(deviceName);
+  const isInstalledPrinter = Boolean(printer.Local || printer.Network);
+  return isInstalledPrinter && !VIRTUAL_PRINTER_PATTERN.test(deviceName);
 }
 
 function normalizePrinter(printer) {
   const normalizedStatus = normalizePrinterStatus(printer.PrinterStatus);
+  const connection = resolvePrinterConnection(printer);
   return {
     id: `printer:${String(printer.Name || '').trim().toLowerCase()}`,
     name: printer.Name,
@@ -770,7 +795,7 @@ function normalizePrinter(printer) {
     portName: printer.PortName || null,
     isDefault: Boolean(printer.Default),
     status: normalizedStatus,
-    connection: 'local',
+    connection,
   };
 }
 
@@ -791,7 +816,7 @@ async function detectPrinters() {
 
     return uniqueByName(
       printers
-        .filter((printer) => printer && isPhysicalPrinter(printer) && hasAllowedPrinterStatus(printer))
+        .filter((printer) => printer && isInstalledPhysicalPrinter(printer) && hasAllowedPrinterStatus(printer))
         .map(normalizePrinter)
     );
   });
