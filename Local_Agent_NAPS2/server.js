@@ -8,7 +8,11 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const { exec, spawn } = require('child_process');
 const { EventEmitter } = require('events');
+const createMulticastDns = require('multicast-dns');
+const dns = require('dns').promises;
 const fs = require('fs');
+const net = require('net');
+const os = require('os');
 const path = require('path');
 const util = require('util');
 const axios = require('axios');
@@ -123,8 +127,14 @@ const DEVICE_RECENT_CHANGE_WINDOW = toInteger(process.env.DEVICE_RECENT_CHANGE_W
 const DEVICE_FAILURE_BACKOFF_INTERVAL = toInteger(process.env.DEVICE_FAILURE_BACKOFF_INTERVAL, 120000);
 const DEVICE_FAILURE_BACKOFF_THRESHOLD = toInteger(process.env.DEVICE_FAILURE_BACKOFF_THRESHOLD, 3);
 const DEVICE_ERROR_LOG_THROTTLE = toInteger(process.env.DEVICE_ERROR_LOG_THROTTLE, 60000);
+const MDNS_DISCOVERY_TIMEOUT = toInteger(process.env.MDNS_DISCOVERY_TIMEOUT, 1500);
+const NETWORK_PRINTER_SCAN_TIMEOUT = toInteger(process.env.NETWORK_PRINTER_SCAN_TIMEOUT, 180);
+const NETWORK_PRINTER_SCAN_CONCURRENCY = toInteger(process.env.NETWORK_PRINTER_SCAN_CONCURRENCY, 64);
+const NETWORK_PRINTER_MAX_HOSTS_PER_INTERFACE = toInteger(process.env.NETWORK_PRINTER_MAX_HOSTS_PER_INTERFACE, 254);
 const NAPS2_NAMES = ['naps2.console.exe', 'NAPS2.Console.exe'];
 const VIRTUAL_PRINTER_PATTERN = /(pdf|xps|onenote|fax|microsoft print to pdf|microsoft xps document writer|send to onenote|adobe pdf|cutepdf|bullzip|do[pd]f|foxit pdf|print to file)/i;
+const MDNS_PRINTER_SERVICE_TYPES = ['_ipp._tcp.local', '_ipps._tcp.local', '_printer._tcp.local', '_pdl-datastream._tcp.local'];
+const NETWORK_PRINTER_PORTS = [9100, 631, 515];
 const STATE_DIR = path.resolve(getStateDirectory());
 const DEVICE_CACHE_FILE = path.join(STATE_DIR, 'device-cache.json');
 
@@ -722,6 +732,351 @@ function buildPrinterEnumerationCommand() {
   return `powershell -NoProfile -ExecutionPolicy Bypass -Command "${script}"`;
 }
 
+function trimTrailingDot(value) {
+  return String(value || '').trim().replace(/\.$/, '');
+}
+
+function parseMdnsTxtRecord(recordData) {
+  const entries = Array.isArray(recordData) ? recordData : [];
+  const parsed = {};
+
+  for (const entry of entries) {
+    const rawValue = Buffer.isBuffer(entry)
+      ? entry.toString('utf8')
+      : typeof entry === 'string'
+        ? entry
+        : String(entry || '');
+
+    const separatorIndex = rawValue.indexOf('=');
+    if (separatorIndex === -1) {
+      parsed[rawValue] = true;
+      continue;
+    }
+
+    const key = rawValue.slice(0, separatorIndex).trim();
+    const value = rawValue.slice(separatorIndex + 1).trim();
+    if (key) {
+      parsed[key] = value;
+    }
+  }
+
+  return parsed;
+}
+
+function getMdnsProtocol(serviceType) {
+  switch (serviceType) {
+    case '_ipps._tcp.local':
+      return 'ipps';
+    case '_ipp._tcp.local':
+      return 'ipp';
+    case '_printer._tcp.local':
+      return 'printer';
+    case '_pdl-datastream._tcp.local':
+      return 'pdl-datastream';
+    default:
+      return 'mdns';
+  }
+}
+
+function cleanMdnsInstanceName(instanceName) {
+  return trimTrailingDot(instanceName)
+    .replace(/\._(ipp|ipps|printer|pdl-datastream)\._tcp\.local$/i, '')
+    .trim();
+}
+
+function buildDiscoveredPrinterId(serviceType, host, port, fallbackName) {
+  const normalizedHost = String(host || '').trim().toLowerCase();
+  const normalizedName = String(fallbackName || '').trim().toLowerCase();
+  return `network-printer:${serviceType}:${normalizedHost || normalizedName}:${port || 0}`;
+}
+
+function ipv4ToInteger(ipAddress) {
+  return ipAddress.split('.').reduce((accumulator, octet) => ((accumulator << 8) + Number(octet)) >>> 0, 0);
+}
+
+function integerToIpv4(value) {
+  return [24, 16, 8, 0].map((shift) => (value >>> shift) & 255).join('.');
+}
+
+function getPrivateIpv4Candidates() {
+  const interfaces = os.networkInterfaces();
+  const candidates = [];
+
+  for (const details of Object.values(interfaces)) {
+    for (const detail of details || []) {
+      if (!detail || detail.family !== 'IPv4' || detail.internal || !detail.cidr) {
+        continue;
+      }
+
+      const [address, prefixLengthString] = detail.cidr.split('/');
+      const prefixLength = Number(prefixLengthString);
+      if (!Number.isInteger(prefixLength) || prefixLength < 1 || prefixLength > 32) {
+        continue;
+      }
+
+      const numericAddress = ipv4ToInteger(address);
+      const effectivePrefixLength = prefixLength >= 24 ? prefixLength : 24;
+      const mask = effectivePrefixLength === 0 ? 0 : ((0xffffffff << (32 - effectivePrefixLength)) >>> 0);
+      const networkAddress = numericAddress & mask;
+      const broadcastAddress = networkAddress | (~mask >>> 0);
+      const hostCount = Math.min(Math.max(broadcastAddress - networkAddress - 1, 0), NETWORK_PRINTER_MAX_HOSTS_PER_INTERFACE);
+      const startAddress = Math.max(networkAddress + 1, numericAddress - Math.floor(hostCount / 2));
+      const endAddress = Math.min(broadcastAddress - 1, startAddress + hostCount - 1);
+
+      candidates.push({
+        address,
+        startAddress,
+        endAddress,
+      });
+    }
+  }
+
+  return candidates;
+}
+
+async function probeTcpPort(host, port, timeoutMs) {
+  return new Promise((resolve) => {
+    const socket = new net.Socket();
+    let settled = false;
+
+    const finish = (isOpen) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      socket.destroy();
+      resolve(isOpen);
+    };
+
+    socket.setTimeout(timeoutMs);
+    socket.once('connect', () => finish(true));
+    socket.once('timeout', () => finish(false));
+    socket.once('error', () => finish(false));
+    socket.connect(port, host);
+  });
+}
+
+async function mapWithConcurrency(items, concurrency, worker) {
+  const results = [];
+  let currentIndex = 0;
+
+  const runners = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (currentIndex < items.length) {
+      const itemIndex = currentIndex;
+      currentIndex += 1;
+      results[itemIndex] = await worker(items[itemIndex], itemIndex);
+    }
+  });
+
+  await Promise.all(runners);
+  return results;
+}
+
+async function discoverNetworkPrintersByTcpProbe() {
+  const candidates = getPrivateIpv4Candidates();
+  const hostTargets = [];
+
+  for (const candidate of candidates) {
+    for (let value = candidate.startAddress; value <= candidate.endAddress; value += 1) {
+      const host = integerToIpv4(value);
+      if (host !== candidate.address) {
+        hostTargets.push(host);
+      }
+    }
+  }
+
+  const uniqueHosts = Array.from(new Set(hostTargets));
+
+  const discoveredPrinters = await mapWithConcurrency(uniqueHosts, NETWORK_PRINTER_SCAN_CONCURRENCY, async (host) => {
+    for (const port of NETWORK_PRINTER_PORTS) {
+      const isOpen = await probeTcpPort(host, port, NETWORK_PRINTER_SCAN_TIMEOUT);
+      if (!isOpen) {
+        continue;
+      }
+
+      let hostname = null;
+      try {
+        const resolvedHosts = await dns.reverse(host);
+        hostname = resolvedHosts[0] || null;
+      } catch (_error) {
+        hostname = null;
+      }
+
+      const displayName = hostname ? trimTrailingDot(hostname) : `Network Printer ${host}`;
+      return {
+        id: buildDiscoveredPrinterId('tcp', host, port, displayName),
+        name: displayName,
+        type: 'printer',
+        driverName: null,
+        portName: `${host}:${port}`,
+        isDefault: false,
+        status: 'available',
+        connection: 'network',
+        source: 'discovered',
+        host,
+        hostname,
+        protocol: port === 631 ? 'ipp' : port === 515 ? 'lpd' : 'raw',
+      };
+    }
+
+    return null;
+  });
+
+  return uniqueByName(discoveredPrinters.filter(Boolean));
+}
+
+function createPrinterDedupKey(printer) {
+  const normalizedName = String(printer.name || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\(network\)/g, '')
+    .replace(/\s+/g, ' ');
+  const normalizedDriver = String(printer.driverName || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\(network\)/g, '')
+    .replace(/\s+/g, ' ');
+  const normalizedHost = String(printer.host || '')
+    .trim()
+    .toLowerCase();
+
+  return `${normalizedHost}|${normalizedDriver || normalizedName}`;
+}
+
+function mergePrinterLists(installedPrinters, discoveredPrinters) {
+  const mergedPrinters = [];
+  const seen = new Set();
+
+  for (const printer of [...installedPrinters, ...discoveredPrinters]) {
+    const dedupKey = createPrinterDedupKey(printer);
+    if (dedupKey === '|' || seen.has(dedupKey)) {
+      continue;
+    }
+
+    seen.add(dedupKey);
+    mergedPrinters.push(printer);
+  }
+
+  return mergedPrinters;
+}
+
+async function discoverNetworkPrintersByMdns() {
+  return new Promise((resolve) => {
+    const mdns = createMulticastDns({ reuseAddr: true });
+    const ptrRecords = new Map();
+    const srvRecords = new Map();
+    const txtRecords = new Map();
+    const addressRecords = new Map();
+
+    const addAddress = (recordName, address) => {
+      const normalizedRecordName = trimTrailingDot(recordName);
+      if (!normalizedRecordName || !address) {
+        return;
+      }
+
+      const addresses = addressRecords.get(normalizedRecordName) || new Set();
+      addresses.add(String(address));
+      addressRecords.set(normalizedRecordName, addresses);
+    };
+
+    const collectRecord = (record) => {
+      if (!record || !record.type) {
+        return;
+      }
+
+      const recordName = trimTrailingDot(record.name);
+
+      if (record.type === 'PTR' && MDNS_PRINTER_SERVICE_TYPES.includes(recordName)) {
+        const instanceName = trimTrailingDot(record.data);
+        if (instanceName) {
+          ptrRecords.set(instanceName, {
+            instanceName,
+            serviceType: recordName,
+          });
+        }
+        return;
+      }
+
+      if (record.type === 'SRV' && record.data) {
+        srvRecords.set(recordName, {
+          target: trimTrailingDot(record.data.target),
+          port: Number(record.data.port) || 0,
+        });
+        return;
+      }
+
+      if (record.type === 'TXT') {
+        txtRecords.set(recordName, parseMdnsTxtRecord(record.data));
+        return;
+      }
+
+      if (record.type === 'A' || record.type === 'AAAA') {
+        addAddress(recordName, record.data);
+      }
+    };
+
+    const finish = () => {
+      try {
+        mdns.destroy();
+      } catch (_error) {
+        // Ignore socket shutdown errors.
+      }
+
+      const discoveredPrinters = [];
+
+      for (const { instanceName, serviceType } of ptrRecords.values()) {
+        const srv = srvRecords.get(instanceName);
+        const txt = txtRecords.get(instanceName) || {};
+        const hostname = trimTrailingDot(srv?.target || '');
+        const addresses = Array.from(addressRecords.get(hostname) || []);
+        const displayName = txt.ty || txt.note || cleanMdnsInstanceName(instanceName);
+        const host = addresses[0] || hostname;
+
+        if (!displayName || !host) {
+          continue;
+        }
+
+        discoveredPrinters.push({
+          id: buildDiscoveredPrinterId(serviceType, host, srv?.port, displayName),
+          name: displayName,
+          type: 'printer',
+          driverName: txt.product || txt.ty || null,
+          portName: srv?.port ? `${host}:${srv.port}` : host,
+          isDefault: false,
+          status: 'available',
+          connection: 'network',
+          source: 'discovered',
+          host,
+          hostname: hostname || null,
+          protocol: getMdnsProtocol(serviceType),
+        });
+      }
+
+      resolve(uniqueByName(discoveredPrinters));
+    };
+
+    mdns.on('response', (response) => {
+      for (const record of [...(response.answers || []), ...(response.additionals || [])]) {
+        collectRecord(record);
+      }
+    });
+
+    mdns.on('error', (error) => {
+      logDeviceMessage('warn', `[devices] mDNS printer discovery failed: ${formatDetectionError(error)}`, 'mdns-printer-discovery');
+      finish();
+    });
+
+    for (const serviceType of MDNS_PRINTER_SERVICE_TYPES) {
+      mdns.query({
+        questions: [{ name: serviceType, type: 'PTR' }],
+      });
+    }
+
+    setTimeout(finish, MDNS_DISCOVERY_TIMEOUT);
+  });
+}
+
 function normalizePrinterStatus(status) {
   if (status === null || status === undefined || status === '') {
     return 'unknown';
@@ -796,29 +1151,68 @@ function normalizePrinter(printer) {
     isDefault: Boolean(printer.Default),
     status: normalizedStatus,
     connection,
+    source: 'installed',
   };
+}
+
+async function detectInstalledPrinters() {
+  const result = await run(buildPrinterEnumerationCommand(), {
+    timeout: DEVICE_DETECTION_TIMEOUT,
+    maxBuffer: 1024 * 1024,
+  });
+
+  const rawOutput = result.stdout.trim();
+  if (!rawOutput) {
+    return [];
+  }
+
+  const parsed = JSON.parse(rawOutput);
+  const printers = Array.isArray(parsed) ? parsed : [parsed];
+
+  return uniqueByName(
+    printers
+      .filter((printer) => printer && isInstalledPhysicalPrinter(printer) && hasAllowedPrinterStatus(printer))
+      .map(normalizePrinter)
+  );
 }
 
 async function detectPrinters() {
   return withDetectionTimeout('printer detection', async () => {
-    const result = await run(buildPrinterEnumerationCommand(), {
-      timeout: DEVICE_DETECTION_TIMEOUT,
-      maxBuffer: 1024 * 1024,
-    });
+    const results = await Promise.allSettled([
+      detectInstalledPrinters(),
+      discoverNetworkPrintersByMdns(),
+    ]);
 
-    const rawOutput = result.stdout.trim();
-    if (!rawOutput) {
-      return [];
+    const installedPrinters = results[0].status === 'fulfilled' ? results[0].value : [];
+    let discoveredPrinters = results[1].status === 'fulfilled' ? results[1].value : [];
+
+    if (results[0].status === 'rejected') {
+      logDeviceMessage('warn', `[devices] Installed printer detection failed: ${formatDetectionError(results[0].reason)}`, 'installed-printer-detection');
     }
 
-    const parsed = JSON.parse(rawOutput);
-    const printers = Array.isArray(parsed) ? parsed : [parsed];
+    if (results[1].status === 'rejected') {
+      logDeviceMessage('warn', `[devices] Network printer discovery failed: ${formatDetectionError(results[1].reason)}`, 'network-printer-discovery');
+    }
 
-    return uniqueByName(
-      printers
-        .filter((printer) => printer && isInstalledPhysicalPrinter(printer) && hasAllowedPrinterStatus(printer))
-        .map(normalizePrinter)
-    );
+    if (discoveredPrinters.length === 0) {
+      try {
+        discoveredPrinters = await discoverNetworkPrintersByTcpProbe();
+      } catch (error) {
+        logDeviceMessage('warn', `[devices] TCP network printer discovery failed: ${formatDetectionError(error)}`, 'tcp-network-printer-discovery');
+      }
+    }
+
+    if (installedPrinters.length === 0 && discoveredPrinters.length === 0) {
+      if (results[0].status === 'rejected') {
+        throw results[0].reason;
+      }
+
+      if (results[1].status === 'rejected') {
+        throw results[1].reason;
+      }
+    }
+
+    return mergePrinterLists(installedPrinters, discoveredPrinters);
   });
 }
 
