@@ -10,6 +10,7 @@ process.env.SCANNER_AGENT_PACKAGED = app.isPackaged ? 'true' : 'false';
 process.env.SCANS_DIR = process.env.SCANS_DIR || path.join(app.getPath('userData'), 'scans');
 process.env.BIN_DIR = process.env.BIN_DIR || path.join(app.getPath('userData'), 'bin');
 process.env.SCANNER_AGENT_LOG_DIR = process.env.SCANNER_AGENT_LOG_DIR || path.join(app.getPath('userData'), 'logs');
+process.env.SCANNER_AGENT_STATE_DIR = process.env.SCANNER_AGENT_STATE_DIR || path.join(app.getPath('userData'), 'state');
 
 let consoleInstalled = false;
 let processHandlersInstalled = false;
@@ -87,11 +88,12 @@ function installProcessErrorHandlers() {
 installConsoleFileLogger();
 installProcessErrorHandlers();
 
-const { startServer, stopServer } = require('./server');
+const { startServer, stopServer, getDeviceStatus, onDeviceStatusChange } = require('./server');
 
 let tray = null;
 let isQuitting = false;
 let currentStatus = 'Starting Scanner Agent...';
+let disposeDeviceStatusSubscription = null;
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -135,8 +137,17 @@ function refreshTray() {
     return;
   }
 
-  tray.setToolTip('Scanner Agent Running');
+  tray.setToolTip(`Scanner Agent - ${currentStatus}`);
   tray.setContextMenu(buildTrayMenu());
+}
+
+function updateTrayStatusFromDeviceState(status = getDeviceStatus()) {
+  if (!status) {
+    return;
+  }
+
+  currentStatus = status.trayStatus || 'Initializing devices...';
+  refreshTray();
 }
 
 function configureAutoLaunch() {
@@ -164,6 +175,11 @@ async function shutdownAndQuit() {
     console.error('[electron] Failed to stop scanner server cleanly:', error);
   }
 
+  if (disposeDeviceStatusSubscription) {
+    disposeDeviceStatusSubscription();
+    disposeDeviceStatusSubscription = null;
+  }
+
   if (tray) {
     tray.destroy();
     tray = null;
@@ -181,7 +197,8 @@ async function bootstrap() {
 
   try {
     await startServer();
-    currentStatus = 'Scanner Agent Running';
+    disposeDeviceStatusSubscription = onDeviceStatusChange(updateTrayStatusFromDeviceState);
+    updateTrayStatusFromDeviceState(getDeviceStatus());
     console.log(`[electron] Tray host started. Log file: ${getLogFilePath()}`);
   } catch (error) {
     currentStatus = 'Scanner Agent Error';
