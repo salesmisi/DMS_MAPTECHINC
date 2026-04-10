@@ -369,6 +369,10 @@ function markRecentDeviceChange() {
   deviceRefreshState.recentChangeUntil = Date.now() + DEVICE_RECENT_CHANGE_WINDOW;
 }
 
+function getBaseRefreshReason(reason = 'scheduled') {
+  return String(reason).replace(/^(adaptive:)+/, '') || 'scheduled';
+}
+
 function hasRecentDeviceChange() {
   return Date.now() < deviceRefreshState.recentChangeUntil;
 }
@@ -399,10 +403,11 @@ function scheduleNextDeviceRefresh(reason = 'scheduled') {
   }
 
   const delay = getNextRefreshDelay();
+  const baseReason = getBaseRefreshReason(reason);
   deviceRefreshState.nextRefreshAt = Date.now() + delay;
   deviceRefreshTimer = setTimeout(() => {
     deviceRefreshTimer = null;
-    queueDeviceRefresh(`adaptive:${reason}`);
+    queueDeviceRefresh(`adaptive:${baseReason}`);
   }, delay);
 }
 
@@ -659,24 +664,52 @@ async function detectScanners() {
     throw new Error('NAPS2 not found');
   }
 
-  return withDetectionTimeout('scanner detection', async () => {
-    const results = await Promise.allSettled([
-      detectNaps2Devices(naps2, 'wia'),
-      detectNaps2Devices(naps2, 'twain'),
-    ]);
+  const results = await Promise.allSettled([
+    detectNaps2Devices(naps2, 'wia'),
+    detectNaps2Devices(naps2, 'twain'),
+  ]);
 
-    const scanners = [];
+  const scanners = [];
+  const detectionErrors = [];
 
-    for (const result of results) {
-      if (result.status === 'fulfilled') {
-        scanners.push(...result.value);
-      } else {
-        console.warn('[devices] Scanner driver detection failed:', formatDetectionError(result.reason));
-      }
+  for (const result of results) {
+    if (result.status === 'fulfilled') {
+      scanners.push(...result.value);
+    } else {
+      const errorMessage = formatDetectionError(result.reason);
+      detectionErrors.push(errorMessage);
+      console.warn('[devices] Scanner driver detection failed:', errorMessage);
     }
+  }
 
-    return uniqueByName(scanners);
-  });
+  if (scanners.length === 0 && detectionErrors.length > 0) {
+    throw new Error(detectionErrors.join(' | '));
+  }
+
+  return uniqueByName(scanners);
+}
+
+function findCachedScanner(identifier) {
+  const normalizedIdentifier = String(identifier || '').trim().toLowerCase();
+
+  if (!normalizedIdentifier) {
+    return deviceCache.scanners.items.length === 1 ? deviceCache.scanners.items[0] : null;
+  }
+
+  return deviceCache.scanners.items.find((scanner) => {
+    const normalizedId = String(scanner.id || '').trim().toLowerCase();
+    const normalizedName = String(scanner.name || '').trim().toLowerCase();
+    return normalizedId === normalizedIdentifier || normalizedName === normalizedIdentifier;
+  }) || null;
+}
+
+function resolveScannerSelection(scannerIdentifier, requestedDriver) {
+  const cachedScanner = findCachedScanner(scannerIdentifier);
+
+  return {
+    scannerName: cachedScanner?.name || scannerIdentifier || undefined,
+    driver: requestedDriver || cachedScanner?.driver || 'wia',
+  };
 }
 
 function buildPrinterEnumerationCommand() {
@@ -1198,7 +1231,10 @@ app.post('/scan', async (req, res) => {
   } = req.body;
 
   const resolvedFolderId = getFolderId({ folder_id, folderId });
-  const resolvedScannerName = scannerName || scanner;
+  const requestedScanner = scannerName || scanner;
+  const resolvedScannerSelection = resolveScannerSelection(requestedScanner, driver);
+  const resolvedScannerName = resolvedScannerSelection.scannerName;
+  const resolvedDriver = resolvedScannerSelection.driver;
   const resolvedColorMode = colorMode || color;
 
   // Validation
@@ -1223,7 +1259,7 @@ app.post('/scan', async (req, res) => {
 
   // Build NAPS2 command
   let cmd = `"${naps2}" -o "${outputFile}"`;
-  cmd += ` --driver ${driver}`;
+  cmd += ` --driver ${resolvedDriver}`;
 
   if (resolvedScannerName) {
     cmd += ` --device "${resolvedScannerName}"`;
@@ -1259,6 +1295,7 @@ app.post('/scan', async (req, res) => {
     if (!fs.existsSync(outputFile)) {
       return res.status(500).json({
         error: 'Scan completed but output file not found',
+        details: 'The scan command completed without producing a file. Verify the selected scanner driver and that paper is loaded if using the feeder.',
         sessionId,
       });
     }
@@ -1348,7 +1385,10 @@ app.post('/scan-local', async (req, res) => {
     scanSource,
   } = req.body;
 
-  const resolvedScannerName = scannerName || scanner;
+  const requestedScanner = scannerName || scanner;
+  const resolvedScannerSelection = resolveScannerSelection(requestedScanner, driver);
+  const resolvedScannerName = resolvedScannerSelection.scannerName;
+  const resolvedDriver = resolvedScannerSelection.driver;
   const resolvedColorMode = colorMode || color;
 
   const ext = format === 'png' ? 'png' : format === 'jpg' ? 'jpg' : 'pdf';
@@ -1360,7 +1400,7 @@ app.post('/scan-local', async (req, res) => {
   const pagesizeMap = { letter: 'letter', a4: 'a4', legal: 'legal' };
   const pagesize = pagesizeMap[paperSize] || 'letter';
 
-  let cmd = `"${naps2}" -o "${outputFile}" --driver ${driver}`;
+  let cmd = `"${naps2}" -o "${outputFile}" --driver ${resolvedDriver}`;
   if (resolvedScannerName) cmd += ` --device "${resolvedScannerName}"`;
   cmd += ` --dpi ${dpi} --bitdepth ${bitdepth} --pagesize ${pagesize}`;
   if (scanSource === 'feeder') cmd += ' --source feeder';
@@ -1374,7 +1414,11 @@ app.post('/scan-local', async (req, res) => {
     await run(cmd);
 
     if (!fs.existsSync(outputFile)) {
-      return res.status(500).json({ error: 'Output file not created', sessionId });
+      return res.status(500).json({
+        error: 'Output file not created',
+        details: 'The scan command completed without producing a file. Verify the selected scanner driver and that paper is loaded if using the feeder.',
+        sessionId,
+      });
     }
 
     const stats = fs.statSync(outputFile);

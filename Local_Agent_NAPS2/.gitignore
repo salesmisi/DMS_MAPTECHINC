@@ -4,3 +4,4 @@ scans/
 *.log
 dist/
 logs/
+state/
